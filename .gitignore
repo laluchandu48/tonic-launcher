@@ -1,0 +1,13 @@
+# Dependencies and build output
+node_modules/
+dist/
+*.log
+
+# Secrets — the database holds the Tonic API key and secret in plain text.
+# Ignore the whole directory: SQLite also writes -wal and -shm alongside the
+# .db, and those contain the same data.
+server/.env
+server/data/
+
+# Local diagnostics
+server/diagnose.mjs
