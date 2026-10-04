@@ -40,10 +40,36 @@ export default function Articles() {
   const [submitting, setSubmitting] = useState(false);
   const [needsCredentials, setNeedsCredentials] = useState(false);
 
+  // Launching straight from an article row, the way Tonic's own Articles list does.
+  const [counts, setCounts] = useState({});
+  const [launchFor, setLaunchFor] = useState(null);
+  const [campaignName, setCampaignName] = useState('');
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState('');
+
+  /**
+   * How many campaigns already point at each article. Tonic shows this beside
+   * the launch link, so you can see at a glance what you have already used.
+   * Stats are skipped — only the article id of each campaign matters here.
+   */
+  const loadCounts = async () => {
+    try {
+      const { rows } = await api.campaigns.list('pending,active,stopped', { stats: 'false' });
+      const tally = {};
+      for (const c of rows || []) {
+        if (c.articleId != null) tally[c.articleId] = (tally[c.articleId] || 0) + 1;
+      }
+      setCounts(tally);
+    } catch {
+      // The count is a convenience; a failure here must not blank the list.
+    }
+  };
+
   const load = async () => {
     try {
       const result = await api.articles.list();
       setRequests(result.rows || []);
+      loadCounts();
     } catch (err) {
       if (err.code === 'NO_CREDENTIALS') setNeedsCredentials(true);
       else toast.error(err.message);
@@ -133,6 +159,42 @@ export default function Articles() {
     }
   };
 
+  /** Only a published article has an id Tonic will accept on a campaign. */
+  const articleIdOf = (r) => r.articleId ?? r.headline_id ?? null;
+  const canLaunch = (r) =>
+    articleIdOf(r) != null &&
+    ['published', 'approved'].includes(String(r.status || '').toLowerCase());
+
+  const openLaunch = (r) => {
+    setLaunchFor(r);
+    setLaunchError('');
+    setCampaignName([r.offer_name, r.country, languageName(r.language)].filter(Boolean).join(' - '));
+  };
+
+  const launch = async () => {
+    const name = campaignName.trim();
+    if (!name) {
+      setLaunchError('Give the campaign a name.');
+      return;
+    }
+    setLaunching(true);
+    try {
+      const created = await api.campaigns.create({ name, articleId: articleIdOf(launchFor) });
+      setLaunchFor(null);
+      toast.success(
+        created.tonic_campaign_id
+          ? `Campaign ${created.name} created (id ${created.tonic_campaign_id}).`
+          : `Campaign created. ${created.note || ''}`
+      );
+      loadCounts();
+    } catch (err) {
+      setLaunchError(err.message);
+      toast.error(err.message);
+    } finally {
+      setLaunching(false);
+    }
+  };
+
   return (
     <Layout
       title="Articles"
@@ -175,6 +237,8 @@ export default function Articles() {
                 <th>Language</th>
                 <th>Domain</th>
                 <th>Created</th>
+                <th>Campaigns</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -191,12 +255,71 @@ export default function Articles() {
                   <td>{languageName(r.language)}</td>
                   <td className="muted">{r.domain}</td>
                   <td className="muted">{r.created_at?.slice(0, 16)}</td>
+                  <td className="mono">{counts[articleIdOf(r)] ?? 0}</td>
+                  <td>
+                    {canLaunch(r) ? (
+                      <button className="btn btn-ghost" onClick={() => openLaunch(r)}>Create campaign</button>
+                    ) : (
+                      <span className="muted" title="Available once Tonic publishes the article">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      <Drawer
+        title="Create Campaign"
+        open={Boolean(launchFor)}
+        onClose={() => setLaunchFor(null)}
+        footer={
+          <>
+            <button className="btn btn-secondary" onClick={() => setLaunchFor(null)}>Cancel</button>
+            <button className="btn" onClick={launch} disabled={launching}>
+              {launching && <span className="spinner" />}
+              {launching ? 'Creating…' : 'Create Campaign'}
+            </button>
+          </>
+        }
+      >
+        {launchFor && (
+          <>
+            <div className="field">
+              <label htmlFor="campaign-name">Campaign name</label>
+              <p className="hint">The offer, GEO and language come from the article itself.</p>
+              <input
+                id="campaign-name"
+                type="text"
+                className={launchError ? 'invalid' : ''}
+                value={campaignName}
+                autoFocus
+                onChange={(e) => { setCampaignName(e.target.value); setLaunchError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !launching) launch(); }}
+              />
+              {launchError && <p className="error-text">{launchError}</p>}
+            </div>
+
+            <div className="summary">
+              <dl>
+                <dt>Article ID</dt>
+                <dd className="mono">{articleIdOf(launchFor)}</dd>
+                <dt>Title</dt>
+                <dd>{launchFor.headline || <span className="muted">—</span>}</dd>
+                <dt>Offer</dt>
+                <dd>{launchFor.offer_name || launchFor.offer_id || <span className="muted">—</span>}</dd>
+                <dt>Vertical</dt>
+                <dd>{launchFor.vertical_name || <span className="muted">—</span>}</dd>
+                <dt>GEO</dt>
+                <dd>{launchFor.country}</dd>
+                <dt>Language</dt>
+                <dd>{languageName(launchFor.language)}</dd>
+              </dl>
+            </div>
+          </>
+        )}
+      </Drawer>
 
       <Drawer
         title="Create Article Request"
