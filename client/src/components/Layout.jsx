@@ -4,7 +4,9 @@ const NAV = [
   { to: '/',          label: 'Dashboard', icon: '▦', end: true },
   { to: '/articles',  label: 'Articles',  icon: '☰' },
   { to: '/campaigns', label: 'Campaigns', icon: '◪' },
+  { to: '/final-data', label: 'Final Data', icon: '⇄' },
   { to: '/compliance', label: 'Compliance', icon: '⛨' },
+  { to: '/fb-settings', label: 'FB Settings', icon: 'ƒ' },
   { to: '/settings',  label: 'Settings',  icon: '⚙' },
 ];
 

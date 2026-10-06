@@ -81,6 +81,30 @@ db.exec(`
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Tonic's session report is one request per day and refuses anything older
+  -- than 50 days, so a 30-day Final Data view would be 30 calls on every load.
+  -- Each day is aggregated by the join parameter and kept; a day Tonic has
+  -- finalised never changes again, so it is only ever fetched once.
+  CREATE TABLE IF NOT EXISTS tonic_session_days (
+    date       TEXT    NOT NULL,          -- YYYY-MM-DD (PST/PDT, Tonic's clock)
+    param      TEXT    NOT NULL,          -- the tracking parameter grouped on
+    key        TEXT    NOT NULL,          -- its value, e.g. a Facebook adset id
+    sessions   INTEGER NOT NULL DEFAULT 0,
+    clicks     INTEGER NOT NULL DEFAULT 0,
+    revenue    REAL    NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, param, key)
+  );
+
+  CREATE TABLE IF NOT EXISTS tonic_session_day_status (
+    date       TEXT    NOT NULL,
+    param      TEXT    NOT NULL,
+    complete   INTEGER NOT NULL DEFAULT 0,  -- past Tonic's lastFinalDate
+    truncated  INTEGER NOT NULL DEFAULT 0,  -- hit the page cap; totals are low
+    sessions   INTEGER NOT NULL DEFAULT 0,
+    fetched_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (date, param)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_requests_status ON article_requests(status);
   CREATE INDEX IF NOT EXISTS idx_campaigns_headline ON campaigns(headline_id);
 `);
@@ -258,3 +282,61 @@ export const revenueMonths = {
 };
 
 export default db;
+
+
+// ─── Tonic session days ──────────────────────────────────────────────────────
+
+export const sessionDays = {
+  /** What we know about one day, or null if it was never fetched. */
+  status(date, param) {
+    return db.prepare(
+      'SELECT * FROM tonic_session_day_status WHERE date = ? AND param = ?'
+    ).get(date, param) || null;
+  },
+
+  /**
+   * Replace a day wholesale. A partial write would silently under-report, so
+   * the delete and the inserts share one transaction.
+   */
+  replaceDay(date, param, rows, { complete = 0, truncated = 0, sessions = 0 } = {}) {
+    const wipe = db.prepare('DELETE FROM tonic_session_days WHERE date = ? AND param = ?');
+    const insert = db.prepare(`
+      INSERT INTO tonic_session_days (date, param, key, sessions, clicks, revenue)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const mark = db.prepare(`
+      INSERT INTO tonic_session_day_status (date, param, complete, truncated, sessions, fetched_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(date, param) DO UPDATE SET
+        complete = excluded.complete, truncated = excluded.truncated,
+        sessions = excluded.sessions, fetched_at = datetime('now')
+    `);
+
+    db.transaction(() => {
+      wipe.run(date, param);
+      for (const r of rows) {
+        insert.run(date, param, r.key, r.sessions || 0, r.clicks || 0, r.revenue || 0);
+      }
+      mark.run(date, param, complete ? 1 : 0, truncated ? 1 : 0, sessions);
+    })();
+  },
+
+  /** Everything in a date range, already summed per key. */
+  range(from, to, param) {
+    return db.prepare(`
+      SELECT key,
+             SUM(sessions) AS sessions,
+             SUM(clicks)   AS clicks,
+             SUM(revenue)  AS revenue
+        FROM tonic_session_days
+       WHERE param = ? AND date BETWEEN ? AND ?
+       GROUP BY key
+    `).all(param, from, to);
+  },
+
+  /** Dropped when the join parameter changes — the old grouping is meaningless. */
+  clearParam(param) {
+    db.prepare('DELETE FROM tonic_session_days WHERE param = ?').run(param);
+    db.prepare('DELETE FROM tonic_session_day_status WHERE param = ?').run(param);
+  },
+};

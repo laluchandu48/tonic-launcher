@@ -12,6 +12,8 @@ import articleRoutes from './routes/articles.js';
 import campaignRoutes from './routes/campaigns.js';
 import statsRoutes from './routes/stats.js';
 import complianceRoutes from './routes/compliance.js';
+import fbSettingsRoutes from './routes/fbSettings.js';
+import finalDataRoutes from './routes/finalData.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -28,6 +30,8 @@ app.use('/api/articles', articleRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/compliance', complianceRoutes);
+app.use('/api/fb-settings', fbSettingsRoutes);
+app.use('/api/final-data', finalDataRoutes);
 
 // In production the built client is served by this same process, which keeps
 // the AWS deployment to a single container.

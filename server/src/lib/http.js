@@ -1,5 +1,6 @@
 /** Small helpers shared by the route modules. */
 import { TonicV4Error } from './tonicV4.js';
+import { FacebookError } from './facebook.js';
 import { isConfigured } from './credentials.js';
 
 /** Wrap an async handler so rejections reach the error middleware. */
@@ -32,6 +33,19 @@ export function errorHandler(err, req, res, _next) {
       requestId: err.requestId ?? undefined,
     });
   }
+  if (err instanceof FacebookError) {
+    if (!err.status || err.status >= 500) console.warn('[facebook]', err.message, err.path || '');
+    // A bad token is our stored credential being wrong, not the caller's fault.
+    const status = err.status === 401 || err.status === 403 ? 502 : err.status || 502;
+    return res.status(status).json({
+      error: err.message,
+      source: 'facebook',
+      path: err.path,
+      fbCode: err.code ?? undefined,
+      traceId: err.traceId ?? undefined,
+    });
+  }
+
   console.error('[error]', err);
   res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
 }

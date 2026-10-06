@@ -86,6 +86,27 @@ export const api = {
     deleteArticle: (articleId) => request(`/articles/article/${articleId}`, { method: 'DELETE' }),
   },
 
+  finalData: {
+    get: ({ from, to, param, account } = {}) => {
+      const q = new URLSearchParams();
+      if (from) q.set('from', from);
+      if (to) q.set('to', to);
+      if (param) q.set('param', param);
+      if (account) q.set('account', account);
+      return request(`/final-data?${q}`);
+    },
+  },
+
+  fbSettings: {
+    get: () => request('/fb-settings'),
+    save: (payload) => request('/fb-settings', { method: 'POST', body: payload }),
+    test: () => request('/fb-settings/test', { method: 'POST' }),
+    accounts: () => request('/fb-settings/accounts'),
+    selectAccount: (adAccountId) =>
+      request('/fb-settings/account', { method: 'PUT', body: { adAccountId } }),
+    clear: () => request('/fb-settings', { method: 'DELETE' }),
+  },
+
   campaigns: {
     list: (state = 'active', params = {}) =>
       request(`/campaigns?${new URLSearchParams({ state, ...params })}`),

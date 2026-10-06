@@ -372,3 +372,11 @@ th.num { text-align: right; }
 
 tr.summary-row td { background: #f6f9fa; font-weight: 600; border-top: 1px solid var(--line); }
 tr.summary-row td.label { text-align: right; color: var(--ink-soft); font-weight: 500; }
+
+/* Profit and ROI read at a glance; everything else stays monochrome so these
+   two carry the meaning rather than competing with the rest of the table. */
+.pos { color: #14603a; }
+.neg { color: var(--bad-ink); }
+
+/* The same hint style outside a form field. */
+.hint { font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
