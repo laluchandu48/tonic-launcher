@@ -8,6 +8,7 @@ const NAV = [
   { to: '/compliance', label: 'Compliance', icon: '⛨' },
   { to: '/fb-settings', label: 'FB Settings', icon: 'ƒ' },
   { to: '/settings',  label: 'Settings',  icon: '⚙' },
+  { to: '/account',   label: 'Account',   icon: '◉' },
 ];
 
 export default function Layout({ title, actions, children }) {

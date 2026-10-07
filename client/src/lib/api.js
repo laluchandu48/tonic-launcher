@@ -7,12 +7,20 @@ async function request(path, { method = 'GET', body } = {}) {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    // The session is an HttpOnly cookie; without this it is not sent.
+    credentials: 'same-origin',
   });
 
   const text = await res.text();
   let payload = null;
   if (text) {
     try { payload = JSON.parse(text); } catch { payload = text; }
+  }
+
+  if (res.status === 401 && payload?.code === 'AUTH_REQUIRED') {
+    // Let the shell swap to the sign-in screen rather than every caller
+    // having to recognise this case.
+    window.dispatchEvent(new Event('tl:unauthorised'));
   }
 
   if (!res.ok) {
@@ -28,6 +36,15 @@ async function request(path, { method = 'GET', body } = {}) {
 
 export const api = {
   health: () => request('/health'),
+
+  auth: {
+    me: () => request('/auth/me'),
+    login: (username, password) =>
+      request('/auth/login', { method: 'POST', body: { username, password } }),
+    logout: () => request('/auth/logout', { method: 'POST' }),
+    changePassword: (currentPassword, newPassword) =>
+      request('/auth/password', { method: 'POST', body: { currentPassword, newPassword } }),
+  },
 
   stats: {
     get: ({ from, to, group }) => {

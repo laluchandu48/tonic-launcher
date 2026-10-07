@@ -6,6 +6,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { errorHandler } from './lib/http.js';
+import { requireAuth, ensureFirstUser } from './lib/auth.js';
+import authRoutes from './routes/auth.js';
 import settingsRoutes from './routes/settings.js';
 import lookupRoutes from './routes/lookups.js';
 import articleRoutes from './routes/articles.js';
@@ -22,7 +24,16 @@ const PORT = Number(process.env.PORT) || 5050;
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
 app.use(express.json({ limit: '1mb' }));
 
+// Health is public so a load balancer or uptime check can reach it; it says
+// nothing about the account.
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'tonic-launcher' }));
+
+app.use('/api/auth', authRoutes);
+
+// Everything past this point requires a signed-in session. Placing the guard
+// here rather than on each router means a route added later is protected by
+// default — the safer way round to forget something.
+app.use('/api', requireAuth);
 
 app.use('/api/settings', settingsRoutes);
 app.use('/api/lookups', lookupRoutes);
@@ -47,7 +58,11 @@ if (existsSync(clientDist)) {
 app.use((req, res) => res.status(404).json({ error: `No route for ${req.method} ${req.path}` }));
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`\n  Tonic Launcher API  →  http://localhost:${PORT}`);
-  console.log(`  Health              →  http://localhost:${PORT}/api/health\n`);
-});
+ensureFirstUser()
+  .catch((err) => console.error('[auth] could not create the first account:', err.message))
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`\n  Tonic Launcher API  →  http://localhost:${PORT}`);
+      console.log(`  Health              →  http://localhost:${PORT}/api/health\n`);
+    });
+  });

@@ -401,3 +401,15 @@ th.num .th-sort { justify-content: flex-end; }
 /* The idle arrow stays faint so a sorted column is obvious at a glance. */
 .sort-arrow { font-size: 10px; opacity: 0.25; }
 .sort-arrow.on { opacity: 1; color: var(--accent); }
+
+/* Sign-in. Centred card on the app's own background, so it reads as the same
+   product rather than a separate page bolted on. */
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg, #f3f6f7);
+}
+.login-card { width: 100%; max-width: 360px; padding: 28px; }
+.login-card .brand { color: var(--ink); }

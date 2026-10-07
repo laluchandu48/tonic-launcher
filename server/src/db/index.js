@@ -105,6 +105,18 @@ db.exec(`
     PRIMARY KEY (date, param)
   );
 
+  -- Sign-in. One row per person; passwords are never stored, only a scrypt
+  -- hash with a per-user salt.
+  CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT    NOT NULL,
+    salt          TEXT    NOT NULL,
+    must_change   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_requests_status ON article_requests(status);
   CREATE INDEX IF NOT EXISTS idx_campaigns_headline ON campaigns(headline_id);
 `);
@@ -338,5 +350,39 @@ export const sessionDays = {
   clearParam(param) {
     db.prepare('DELETE FROM tonic_session_days WHERE param = ?').run(param);
     db.prepare('DELETE FROM tonic_session_day_status WHERE param = ?').run(param);
+  },
+};
+
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+
+export const users = {
+  byUsername(username) {
+    return db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').trim()) || null;
+  },
+
+  byId(id) {
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null;
+  },
+
+  count() {
+    return db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  },
+
+  create({ username, passwordHash, salt, mustChange = 1 }) {
+    const info = db.prepare(`
+      INSERT INTO users (username, password_hash, salt, must_change)
+      VALUES (?, ?, ?, ?)
+    `).run(String(username).trim(), passwordHash, salt, mustChange ? 1 : 0);
+    return this.byId(info.lastInsertRowid);
+  },
+
+  setPassword(id, { passwordHash, salt }) {
+    db.prepare(`
+      UPDATE users
+         SET password_hash = ?, salt = ?, must_change = 0, updated_at = datetime('now')
+       WHERE id = ?
+    `).run(passwordHash, salt, id);
+    return this.byId(id);
   },
 };
