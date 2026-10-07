@@ -329,19 +329,6 @@ export default function FinalData() {
         </div>
       ))}
 
-      {t && (
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-label">Profit</div>
-            <div className={`stat-value ${tone(t.profit)}`}>{money(t.profit)}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">ROI</div>
-            <div className={`stat-value ${tone(t.roi)}`}>{t.roi == null ? '—' : `${t.roi} %`}</div>
-          </div>
-        </div>
-      )}
-
       <div className="card">
         <div className="card-head" style={{ flexWrap: 'wrap' }}>
           <div className="toolbar">
