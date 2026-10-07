@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PasswordInput from '../components/PasswordInput.jsx';
 import { api } from '../lib/api.js';
 
 /**
@@ -47,9 +48,8 @@ export default function Login({ onSignedIn }) {
 
         <div className="field">
           <label htmlFor="password">Password</label>
-          <input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

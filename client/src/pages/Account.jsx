@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Layout from '../components/Layout.jsx';
 import { useToast } from '../components/Toast.jsx';
+import PasswordInput from '../components/PasswordInput.jsx';
 import { api } from '../lib/api.js';
 
 const MIN_LENGTH = 8;
@@ -61,9 +62,8 @@ export default function Account({ user, onSignedOut }) {
         <div style={{ padding: 16, display: 'grid', gap: 16, maxWidth: 420 }}>
           <div className="field">
             <label htmlFor="current">Current password</label>
-            <input
+            <PasswordInput
               id="current"
-              type="password"
               autoComplete="current-password"
               className={errors.currentPassword ? 'invalid' : ''}
               value={currentPassword}
@@ -75,9 +75,8 @@ export default function Account({ user, onSignedOut }) {
           <div className="field">
             <label htmlFor="next">New password</label>
             <p className="hint">At least {MIN_LENGTH} characters.</p>
-            <input
+            <PasswordInput
               id="next"
-              type="password"
               autoComplete="new-password"
               className={errors.newPassword ? 'invalid' : ''}
               value={newPassword}
@@ -88,9 +87,8 @@ export default function Account({ user, onSignedOut }) {
 
           <div className="field">
             <label htmlFor="confirm">Repeat new password</label>
-            <input
+            <PasswordInput
               id="confirm"
-              type="password"
               autoComplete="new-password"
               className={errors.confirm ? 'invalid' : ''}
               value={confirm}

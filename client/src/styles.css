@@ -413,3 +413,24 @@ th.num .th-sort { justify-content: flex-end; }
 }
 .login-card { width: 100%; max-width: 360px; padding: 28px; }
 .login-card .brand { color: var(--ink); }
+
+/* Password field with a reveal toggle sitting inside it. */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { padding-right: 40px; width: 100%; }
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.pw-toggle:hover { color: var(--ink); background: #f1f5f6; }
