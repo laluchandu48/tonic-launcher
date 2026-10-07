@@ -24,11 +24,10 @@ import { getV4Client } from '../lib/credentials.js';
 import {
   getFbClient, readFbSettings, requireFbCredentials, rememberAdAccount,
 } from '../lib/fbCredentials.js';
-import { normaliseAdAccountId } from '../lib/facebook.js';
+import { normaliseAdAccountId, minorUnitsPerUnit } from '../lib/facebook.js';
 import { sessionDays } from '../db/index.js';
 
 const router = Router();
-router.use(requireCredentials, requireFbCredentials);
 
 /** Tonic refuses a session report older than this. */
 const MAX_LOOKBACK_DAYS = 50;
@@ -125,7 +124,7 @@ async function ensureTonicRange(from, to, param, lastFinalDate) {
   return { fetched, cached, truncatedDays };
 }
 
-router.get('/', asyncRoute(async (req, res) => {
+router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req, res) => {
   const stored = readFbSettings();
   const param = String(req.query.param || stored.joinParam).trim();
 
@@ -171,13 +170,16 @@ router.get('/', asyncRoute(async (req, res) => {
     // Not fatal — it only decides what gets cached.
   }
 
-  const [fb, statuses, tonicFill] = await Promise.all([
+  const [fb, meta, account, tonicFill] = await Promise.all([
     getFbClient().getAdsetInsights({ since: from, until: to, accountId }),
-    // Delivery status is not an Insights field, so it is fetched alongside and
-    // merged. A failure here must not cost the whole report.
-    getFbClient().getAdsetStatuses(accountId).catch(() => new Map()),
+    // Status and budget are not Insights fields, so they come from the adsets
+    // edge and are merged. A failure here must not cost the whole report.
+    getFbClient().getAdsetMeta(accountId).catch(() => new Map()),
+    getFbClient().getAccountInfo(accountId).catch(() => ({ currency: 'USD', minorUnits: 100 })),
     ensureTonicRange(from, to, param, lastFinalDate),
   ]);
+
+  const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
 
   const tonic = sessionDays.range(from, to, param);
   const byKey = new Map(tonic.map((r) => [String(r.key), r]));
@@ -191,26 +193,42 @@ router.get('/', asyncRoute(async (req, res) => {
 
     const revenue = hit ? Number(hit.revenue) || 0 : 0;
     const profit = revenue - ad.spend;
-    const delivery = statuses.get(ad.adsetId) || {};
+    const delivery = meta.get(ad.adsetId) || {};
+    // A conversion is a Tonic session click — the click on a sponsored listing
+    // that actually earns the revenue.
+    const conversions = hit ? hit.clicks : 0;
+
     rows.push({
       adsetId: ad.adsetId,
       adsetName: ad.adsetName,
       // ACTIVE, PAUSED, CAMPAIGN_PAUSED, ARCHIVED and so on — effectiveStatus
       // accounts for the campaign above it, which plain status does not.
       status: delivery.effectiveStatus || delivery.status || null,
+      // null means the campaign holds the budget (Advantage campaign budget),
+      // which Meta will not let an adset-level edit override.
+      dailyBudget: delivery.dailyBudgetMinor != null
+        ? round(delivery.dailyBudgetMinor / minorUnits)
+        : null,
+      lifetimeBudget: delivery.lifetimeBudgetMinor != null
+        ? round(delivery.lifetimeBudgetMinor / minorUnits)
+        : null,
       campaignName: ad.campaignName,
       spend: round(ad.spend),
       impressions: ad.impressions,
-      fbClicks: ad.clicks,
+      clicks: ad.clicks,
+      leads: ad.leads || 0,
+      conversions,
       sessions: hit ? hit.sessions : 0,
-      tonicClicks: hit ? hit.clicks : 0,
       revenue: round(revenue),
       profit: round(profit),
       // ROI as a percentage of spend. Revenue with no spend has no ROI to
       // report, so it stays null rather than becoming a misleading infinity.
       roi: ad.spend > 0 ? round((profit / ad.spend) * 100, 1) : null,
-      cpc: ad.clicks > 0 ? round(ad.spend / ad.clicks, 3) : null,
-      epc: hit && hit.clicks > 0 ? round(revenue / hit.clicks, 3) : null,
+      // Cost per conversion and revenue per conversion. Both are undefined
+      // rather than zero when nothing converted — a blank reads as "no data",
+      // a zero reads as "free", and only one of those is true.
+      cpl: conversions > 0 ? round(ad.spend / conversions, 3) : null,
+      rpc: conversions > 0 ? round(revenue / conversions, 3) : null,
       matched: Boolean(hit),
     });
   }
@@ -253,19 +271,53 @@ router.get('/', asyncRoute(async (req, res) => {
       profit: round(revenue - spend),
       roi: spend > 0 ? round(((revenue - spend) / spend) * 100, 1) : null,
       impressions: sum(rows, 'impressions'),
-      fbClicks: sum(rows, 'fbClicks'),
-      tonicClicks: sum(rows, 'tonicClicks'),
+      clicks: sum(rows, 'clicks'),
+      leads: sum(rows, 'leads'),
+      conversions: sum(rows, 'conversions'),
       sessions: sum(rows, 'sessions'),
+      dailyBudget: round(sum(rows, 'dailyBudget')),
+      // Totals for the rates are computed from the totals, not averaged from
+      // the rows — averaging rates weights a £1 adset the same as a £1,000 one.
+      cpl: sum(rows, 'conversions') > 0 ? round(spend / sum(rows, 'conversions'), 3) : null,
+      rpc: sum(rows, 'conversions') > 0 ? round(revenue / sum(rows, 'conversions'), 3) : null,
       unmatchedRevenue: round(sum(unmatched, 'revenue')),
     },
     meta: {
       from, to, param, lastFinalDate, accountId,
+      currency: account.currency || 'USD',
       daysFetched: tonicFill.fetched,
       daysFromCache: tonicFill.cached,
       adsets: rows.length,
       matched: rows.filter((r) => r.matched).length,
     },
     notes,
+  });
+}));
+
+/**
+ * Change an adset's daily budget. This is the only endpoint in the app that
+ * writes to an ad platform, so it is deliberately narrow: one adset, one field,
+ * a positive number, and nothing else.
+ */
+router.put('/adsets/:id/budget', requireFbCredentials, asyncRoute(async (req, res) => {
+  const amount = Number(req.body?.dailyBudget);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({
+      error: 'Enter a daily budget greater than zero.',
+      fields: { dailyBudget: 'Enter an amount greater than zero.' },
+    });
+  }
+
+  const accountId = normaliseAdAccountId(req.body?.account) || readFbSettings().adAccountId;
+  const account = await getFbClient().getAccountInfo(accountId);
+  const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
+
+  const result = await getFbClient().setAdsetDailyBudget(req.params.id, amount * minorUnits);
+  res.json({
+    ok: true,
+    adsetId: result.adsetId,
+    dailyBudget: round(result.dailyBudgetMinor / minorUnits),
+    currency: account.currency,
   });
 }));
 

@@ -27,6 +27,42 @@ const withDispatcher = (init) => (dispatcher ? { ...init, dispatcher } : init);
 /** Follow at most this many pages; a sane account never comes close. */
 const MAX_PAGES = 25;
 
+/**
+ * Meta reports leads under several action types. `lead` is the aggregate across
+ * every source, so it is preferred; the others are fallbacks for accounts that
+ * only ever fire one of them. Summing all of them would double-count, because
+ * the aggregate already contains the specific ones.
+ */
+const LEAD_ACTION_PRIORITY = [
+  'lead',
+  'offsite_conversion.fb_pixel_lead',
+  'onsite_conversion.lead_grouped',
+  'leadgen_grouped',
+];
+
+/**
+ * Budgets come back as integers in the account currency's minor unit — cents
+ * for USD, paise for INR. A few currencies have no minor unit at all, and
+ * dividing those by 100 would understate a budget a hundredfold.
+ */
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'TWD', 'COP', 'PYG', 'UGX', 'RWF',
+  'XAF', 'XOF', 'XPF', 'KMF', 'DJF', 'GNF', 'BIF', 'VUV',
+]);
+
+export const minorUnitsPerUnit = (currency) =>
+  ZERO_DECIMAL_CURRENCIES.has(String(currency || '').toUpperCase()) ? 1 : 100;
+
+/** Pick the lead count without double-counting overlapping action types. */
+function leadsFrom(actions) {
+  if (!Array.isArray(actions)) return 0;
+  for (const type of LEAD_ACTION_PRIORITY) {
+    const hit = actions.find((a) => a.action_type === type);
+    if (hit) return Number(hit.value) || 0;
+  }
+  return 0;
+}
+
 export class FacebookError extends Error {
   constructor(message, { status, code, subcode, type, traceId, path } = {}) {
     super(message);
@@ -106,7 +142,7 @@ export class FacebookClient {
    * The token goes in the Authorization header, never the query string — a URL
    * ends up in logs and error messages, and this one would carry a credential.
    */
-  async request(path, query = {}) {
+  async request(path, query = {}, { method = 'GET' } = {}) {
     if (!this.accessToken) throw new FacebookError('No Facebook access token configured.', { status: 428 });
 
     const url = new URL(`${BASE}/${this.apiVersion}${path}`);
@@ -114,11 +150,12 @@ export class FacebookClient {
       if (v === undefined || v === null || v === '') continue;
       url.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
     }
-    return this.requestUrl(url, path);
+    return this.requestUrl(url, path, { method });
   }
 
-  async requestUrl(url, path) {
+  async requestUrl(url, path, { method = 'GET' } = {}) {
     const res = await fetchOrExplain(url, {
+      method,
       headers: { Authorization: `Bearer ${this.accessToken}` },
     }, path);
 
@@ -148,6 +185,19 @@ export class FacebookClient {
       user: me?.name || me?.id || null,
       accounts: accounts.length,
       first: accounts[0] || null,
+    };
+  }
+
+  /** Just enough of the account to render money correctly. */
+  async getAccountInfo(accountId) {
+    const account = normaliseAdAccountId(accountId) || this.adAccountId;
+    if (!account) throw new FacebookError('No ad account selected.', { status: 428 });
+    const data = await this.request(`/${account}`, { fields: 'name,currency' });
+    return {
+      id: account,
+      name: data?.name || null,
+      currency: data?.currency || 'USD',
+      minorUnits: minorUnitsPerUnit(data?.currency),
     };
   }
 
@@ -192,13 +242,13 @@ export class FacebookClient {
    * matters — an adset can be ACTIVE while its campaign is paused, and that
    * shows up here as CAMPAIGN_PAUSED rather than a misleading ACTIVE.
    */
-  async getAdsetStatuses(accountId) {
+  async getAdsetMeta(accountId) {
     const account = normaliseAdAccountId(accountId) || this.adAccountId;
     if (!account) throw new FacebookError('No ad account selected.', { status: 428 });
 
     const byId = new Map();
     let body = await this.request(`/${account}/adsets`, {
-      fields: 'id,name,status,effective_status',
+      fields: 'id,name,status,effective_status,daily_budget,lifetime_budget,campaign_id',
       limit: 500,
     });
 
@@ -208,6 +258,12 @@ export class FacebookClient {
         byId.set(String(a.id), {
           status: a.status || null,
           effectiveStatus: a.effective_status || null,
+          // Both are null when the campaign holds the budget (Advantage
+          // campaign budget). The UI shows that rather than offering an edit
+          // that Meta would reject.
+          dailyBudgetMinor: a.daily_budget != null ? Number(a.daily_budget) : null,
+          lifetimeBudgetMinor: a.lifetime_budget != null ? Number(a.lifetime_budget) : null,
+          campaignId: a.campaign_id != null ? String(a.campaign_id) : null,
         });
       }
       pages += 1;
@@ -216,6 +272,28 @@ export class FacebookClient {
       body = await this.requestUrl(new URL(next), '/adsets');
     }
     return byId;
+  }
+
+  /**
+   * Change one adset's daily budget. This is the only write the launcher makes
+   * to Facebook, and it needs `ads_management` on the token — `ads_read` alone
+   * returns a permissions error here while every other call keeps working.
+   *
+   * `amountMinor` is in the account currency's minor unit, because that is what
+   * Meta stores and returns; converting at the edges keeps rounding out of the
+   * middle of the app.
+   */
+  async setAdsetDailyBudget(adsetId, amountMinor) {
+    const id = String(adsetId || '').replace(/\D/g, '');
+    if (!id) throw new FacebookError('Not a valid adset ID.', { status: 400 });
+
+    const amount = Math.round(Number(amountMinor));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new FacebookError('The budget must be greater than zero.', { status: 400 });
+    }
+
+    await this.request(`/${id}`, { daily_budget: amount }, { method: 'POST' });
+    return { adsetId: id, dailyBudgetMinor: amount };
   }
 
   /**
@@ -230,7 +308,7 @@ export class FacebookClient {
     const rows = [];
     let body = await this.request(`/${account}/insights`, {
       level: 'adset',
-      fields: 'adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks',
+      fields: 'adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,actions',
       time_range: { since, until },
       time_increment: 'all_days',
       limit: 500,
@@ -247,6 +325,7 @@ export class FacebookClient {
           spend: Number(r.spend) || 0,
           impressions: Number(r.impressions) || 0,
           clicks: Number(r.clicks) || 0,
+          leads: leadsFrom(r.actions),
         });
       }
       pages += 1;

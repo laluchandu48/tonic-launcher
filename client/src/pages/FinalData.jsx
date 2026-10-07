@@ -62,6 +62,11 @@ export default function FinalData() {
   const [accountFilter, setAccountFilter] = useState('');
   const [accountsLoading, setAccountsLoading] = useState(true);
 
+  // Which budget cell is open for editing, and what is typed in it.
+  const [editingBudget, setEditingBudget] = useState(null);
+  const [budgetDraft, setBudgetDraft] = useState('');
+  const [savingBudget, setSavingBudget] = useState(false);
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState(null); // 'tonic' | 'facebook'
@@ -137,6 +142,41 @@ export default function FinalData() {
       setCustomTo(today);
     }
     setRangeKey(key);
+  };
+
+  const openBudget = (row) => {
+    if (row.dailyBudget == null) return;   // campaign-level budget: not ours to set
+    setEditingBudget(row.adsetId);
+    setBudgetDraft(String(row.dailyBudget));
+  };
+
+  const saveBudget = async (row) => {
+    const amount = Number(budgetDraft);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Enter a daily budget greater than zero.');
+      return;
+    }
+    if (amount === row.dailyBudget) {
+      setEditingBudget(null);
+      return;
+    }
+
+    setSavingBudget(true);
+    try {
+      const res = await api.finalData.setBudget(row.adsetId, amount, accountId);
+      // Patch the row in place rather than refetching — a full reload would
+      // re-pull every Tonic day for one number.
+      setData((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (r.adsetId === row.adsetId ? { ...r, dailyBudget: res.dailyBudget } : r)),
+      }));
+      setEditingBudget(null);
+      toast.success(`${row.adsetName || row.adsetId} daily budget set to ${money(res.dailyBudget)}.`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingBudget(false);
+    }
   };
 
   const rows = useMemo(() => {
@@ -333,16 +373,17 @@ export default function FinalData() {
               <tr>
                 <th>Adset</th>
                 <th>Status</th>
-                <th>FB campaign</th>
+                <th className="num">Budget</th>
                 <th className="num">Spend</th>
                 <th className="num">Revenue</th>
                 <th className="num">Profit</th>
                 <th className="num">ROI</th>
+                <th className="num" title="Spend ÷ Tonic conversions">CPL</th>
+                <th className="num" title="Revenue ÷ Tonic conversions">RPC</th>
+                <th className="num" title="Leads reported by Facebook">Leads</th>
+                <th className="num" title="Tonic session clicks">Conv.</th>
                 <th className="num">Impr.</th>
-                <th className="num">FB clicks</th>
-                <th className="num">Sessions</th>
-                <th className="num">CPC</th>
-                <th className="num">EPC</th>
+                <th className="num">Clicks</th>
               </tr>
             </thead>
             <tbody>
@@ -355,7 +396,43 @@ export default function FinalData() {
                   <td>
                     <span className={`badge ${statusTone(r.status)}`}>{statusLabel(r.status)}</span>
                   </td>
-                  <td className="muted">{r.campaignName || dash}</td>
+                  <td className="num">
+                    {editingBudget === r.adsetId ? (
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={budgetDraft}
+                        autoFocus
+                        disabled={savingBudget}
+                        onChange={(e) => setBudgetDraft(e.target.value)}
+                        onBlur={() => saveBudget(r)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveBudget(r);
+                          if (e.key === 'Escape') setEditingBudget(null);
+                        }}
+                        style={{ width: 90, textAlign: 'right', padding: '4px 6px' }}
+                        aria-label={`Daily budget for ${r.adsetName || r.adsetId}`}
+                      />
+                    ) : r.dailyBudget != null ? (
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '2px 6px' }}
+                        onClick={() => openBudget(r)}
+                        title="Click to change the daily budget"
+                      >
+                        {money(r.dailyBudget)}
+                      </button>
+                    ) : r.lifetimeBudget != null ? (
+                      <span className="muted" title="Lifetime budget — edit it in Ads Manager">
+                        {money(r.lifetimeBudget)} total
+                      </span>
+                    ) : (
+                      <span className="muted" title="The campaign holds the budget (Advantage campaign budget), so it cannot be set per adset">
+                        campaign
+                      </span>
+                    )}
+                  </td>
                   <td className="num">{money(r.spend)}</td>
                   <td className="num">
                     {r.matched ? money(r.revenue) : (
@@ -364,27 +441,30 @@ export default function FinalData() {
                   </td>
                   <td className={`num ${tone(r.profit)}`}>{money(r.profit)}</td>
                   <td className={`num ${tone(r.roi)}`}>{r.roi == null ? dash : `${r.roi} %`}</td>
+                  <td className="num">{r.cpl == null ? dash : money(r.cpl)}</td>
+                  <td className="num">{r.rpc == null ? dash : money(r.rpc)}</td>
+                  <td className="num">{int(r.leads)}</td>
+                  <td className="num">{int(r.conversions)}</td>
                   <td className="num">{int(r.impressions)}</td>
-                  <td className="num">{int(r.fbClicks)}</td>
-                  <td className="num">{int(r.sessions)}</td>
-                  <td className="num">{r.cpc == null ? dash : money(r.cpc)}</td>
-                  <td className="num">{r.epc == null ? dash : money(r.epc)}</td>
+                  <td className="num">{int(r.clicks)}</td>
                 </tr>
               ))}
             </tbody>
             {t && (
               <tfoot>
                 <tr className="summary-row">
-                  <td className="label" colSpan={3}>Total</td>
+                  <td className="label" colSpan={2}>Total</td>
+                  <td className="num">{money(t.dailyBudget)}</td>
                   <td className="num">{money(t.spend)}</td>
                   <td className="num">{money(t.revenue)}</td>
                   <td className={`num ${tone(t.profit)}`}>{money(t.profit)}</td>
                   <td className={`num ${tone(t.roi)}`}>{t.roi == null ? dash : `${t.roi} %`}</td>
+                  <td className="num">{t.cpl == null ? dash : money(t.cpl)}</td>
+                  <td className="num">{t.rpc == null ? dash : money(t.rpc)}</td>
+                  <td className="num">{int(t.leads)}</td>
+                  <td className="num">{int(t.conversions)}</td>
                   <td className="num">{int(t.impressions)}</td>
-                  <td className="num">{int(t.fbClicks)}</td>
-                  <td className="num">{int(t.sessions)}</td>
-                  <td />
-                  <td />
+                  <td className="num">{int(t.clicks)}</td>
                 </tr>
               </tfoot>
             )}

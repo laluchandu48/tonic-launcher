@@ -95,6 +95,12 @@ export const api = {
       if (account) q.set('account', account);
       return request(`/final-data?${q}`);
     },
+
+    setBudget: (adsetId, dailyBudget, account) =>
+      request(`/final-data/adsets/${encodeURIComponent(adsetId)}/budget`, {
+        method: 'PUT',
+        body: { dailyBudget, account },
+      }),
   },
 
   fbSettings: {
