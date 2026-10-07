@@ -170,11 +170,13 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     // Not fatal — it only decides what gets cached.
   }
 
-  const [fb, meta, account, tonicFill] = await Promise.all([
+  const [fb, meta, campaignMeta, account, tonicFill] = await Promise.all([
     getFbClient().getAdsetInsights({ since: from, until: to, accountId }),
     // Status and budget are not Insights fields, so they come from the adsets
     // edge and are merged. A failure here must not cost the whole report.
     getFbClient().getAdsetMeta(accountId).catch(() => new Map()),
+    // With Advantage campaign budget the adset has no budget of its own.
+    getFbClient().getCampaignMeta(accountId).catch(() => new Map()),
     getFbClient().getAccountInfo(accountId).catch(() => ({ currency: 'USD', minorUnits: 100 })),
     ensureTonicRange(from, to, param, lastFinalDate),
   ]);
@@ -194,6 +196,29 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     const revenue = hit ? Number(hit.revenue) || 0 : 0;
     const profit = revenue - ad.spend;
     const delivery = meta.get(ad.adsetId) || {};
+    const campaign = (ad.campaignId && campaignMeta.get(ad.campaignId)) || {};
+
+    /**
+     * The budget belongs to whichever level actually holds it. An adset budget
+     * wins when present; otherwise it is the campaign's, and editing it from
+     * this row changes every adset under that campaign — which the row says so
+     * the person is not surprised by it.
+     */
+    const budget = (() => {
+      if (delivery.dailyBudgetMinor != null) {
+        return { amount: delivery.dailyBudgetMinor, level: 'adset', type: 'daily', ownerId: ad.adsetId };
+      }
+      if (delivery.lifetimeBudgetMinor != null) {
+        return { amount: delivery.lifetimeBudgetMinor, level: 'adset', type: 'lifetime', ownerId: ad.adsetId };
+      }
+      if (campaign.dailyBudgetMinor != null) {
+        return { amount: campaign.dailyBudgetMinor, level: 'campaign', type: 'daily', ownerId: ad.campaignId };
+      }
+      if (campaign.lifetimeBudgetMinor != null) {
+        return { amount: campaign.lifetimeBudgetMinor, level: 'campaign', type: 'lifetime', ownerId: ad.campaignId };
+      }
+      return null;
+    })();
     // A conversion is a Tonic session click — the click on a sponsored listing
     // that actually earns the revenue.
     const conversions = hit ? hit.clicks : 0;
@@ -204,14 +229,11 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
       // ACTIVE, PAUSED, CAMPAIGN_PAUSED, ARCHIVED and so on — effectiveStatus
       // accounts for the campaign above it, which plain status does not.
       status: delivery.effectiveStatus || delivery.status || null,
-      // null means the campaign holds the budget (Advantage campaign budget),
-      // which Meta will not let an adset-level edit override.
-      dailyBudget: delivery.dailyBudgetMinor != null
-        ? round(delivery.dailyBudgetMinor / minorUnits)
-        : null,
-      lifetimeBudget: delivery.lifetimeBudgetMinor != null
-        ? round(delivery.lifetimeBudgetMinor / minorUnits)
-        : null,
+      budget: budget ? round(budget.amount / minorUnits) : null,
+      budgetLevel: budget?.level ?? null,     // 'adset' | 'campaign'
+      budgetType: budget?.type ?? null,       // 'daily' | 'lifetime'
+      budgetOwnerId: budget?.ownerId ?? null,
+      campaignId: ad.campaignId,
       campaignName: ad.campaignName,
       spend: round(ad.spend),
       impressions: ad.impressions,
@@ -275,7 +297,14 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
       leads: sum(rows, 'leads'),
       conversions: sum(rows, 'conversions'),
       sessions: sum(rows, 'sessions'),
-      dailyBudget: round(sum(rows, 'dailyBudget')),
+      // A campaign budget is shared by every adset beneath it, so summing the
+      // column would count it once per row. Count each owner once.
+      budget: round(
+        [...new Map(
+          rows.filter((r) => r.budget != null && r.budgetType === 'daily')
+              .map((r) => [r.budgetOwnerId, r.budget])
+        ).values()].reduce((n, v) => n + v, 0)
+      ),
       // Totals for the rates are computed from the totals, not averaged from
       // the rows — averaging rates weights a £1 adset the same as a £1,000 one.
       cpl: sum(rows, 'conversions') > 0 ? round(spend / sum(rows, 'conversions'), 3) : null,
@@ -299,7 +328,7 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
  * writes to an ad platform, so it is deliberately narrow: one adset, one field,
  * a positive number, and nothing else.
  */
-router.put('/adsets/:id/budget', requireFbCredentials, asyncRoute(async (req, res) => {
+router.put('/budget/:id', requireFbCredentials, asyncRoute(async (req, res) => {
   const amount = Number(req.body?.dailyBudget);
   if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({
@@ -312,11 +341,11 @@ router.put('/adsets/:id/budget', requireFbCredentials, asyncRoute(async (req, re
   const account = await getFbClient().getAccountInfo(accountId);
   const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
 
-  const result = await getFbClient().setAdsetDailyBudget(req.params.id, amount * minorUnits);
+  const result = await getFbClient().setDailyBudget(req.params.id, amount * minorUnits);
   res.json({
     ok: true,
-    adsetId: result.adsetId,
-    dailyBudget: round(result.dailyBudgetMinor / minorUnits),
+    id: result.id,
+    budget: round(result.dailyBudgetMinor / minorUnits),
     currency: account.currency,
   });
 }));

@@ -275,7 +275,41 @@ export class FacebookClient {
   }
 
   /**
-   * Change one adset's daily budget. This is the only write the launcher makes
+   * Campaign-level budgets. With Advantage campaign budget (CBO) the adset
+   * carries no budget of its own and Meta rejects an adset-level edit, so the
+   * campaign is where the number lives and where it has to be changed.
+   */
+  async getCampaignMeta(accountId) {
+    const account = normaliseAdAccountId(accountId) || this.adAccountId;
+    if (!account) throw new FacebookError('No ad account selected.', { status: 428 });
+
+    const byId = new Map();
+    let body = await this.request(`/${account}/campaigns`, {
+      fields: 'id,name,status,effective_status,daily_budget,lifetime_budget',
+      limit: 500,
+    });
+
+    let pages = 0;
+    while (body && pages < MAX_PAGES) {
+      for (const c of body.data || []) {
+        byId.set(String(c.id), {
+          name: c.name || null,
+          status: c.status || null,
+          effectiveStatus: c.effective_status || null,
+          dailyBudgetMinor: c.daily_budget != null ? Number(c.daily_budget) : null,
+          lifetimeBudgetMinor: c.lifetime_budget != null ? Number(c.lifetime_budget) : null,
+        });
+      }
+      pages += 1;
+      const next = body.paging?.next;
+      if (!next) break;
+      body = await this.requestUrl(new URL(next), '/campaigns');
+    }
+    return byId;
+  }
+
+  /**
+   * Change one adset's or campaign's daily budget. This is the only write the launcher makes
    * to Facebook, and it needs `ads_management` on the token — `ads_read` alone
    * returns a permissions error here while every other call keeps working.
    *
@@ -283,9 +317,16 @@ export class FacebookClient {
    * Meta stores and returns; converting at the edges keeps rounding out of the
    * middle of the app.
    */
-  async setAdsetDailyBudget(adsetId, amountMinor) {
-    const id = String(adsetId || '').replace(/\D/g, '');
-    if (!id) throw new FacebookError('Not a valid adset ID.', { status: 400 });
+  async setDailyBudget(nodeId, amountMinor) {
+    // Both adsets and campaigns are edited the same way — POST to the node with
+    // daily_budget — so one method covers CBO and adset-level budgets alike.
+    // Validate rather than sanitise. Stripping characters out of an id turns a
+    // typo into a write against some *other* object, which is far worse than a
+    // rejected request.
+    const id = String(nodeId || '').trim();
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) {
+      throw new FacebookError('Not a valid adset or campaign ID.', { status: 400 });
+    }
 
     const amount = Math.round(Number(amountMinor));
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -293,7 +334,7 @@ export class FacebookClient {
     }
 
     await this.request(`/${id}`, { daily_budget: amount }, { method: 'POST' });
-    return { adsetId: id, dailyBudgetMinor: amount };
+    return { id, dailyBudgetMinor: amount };
   }
 
   /**

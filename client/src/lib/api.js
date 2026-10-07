@@ -96,8 +96,10 @@ export const api = {
       return request(`/final-data?${q}`);
     },
 
-    setBudget: (adsetId, dailyBudget, account) =>
-      request(`/final-data/adsets/${encodeURIComponent(adsetId)}/budget`, {
+    // `id` is whichever node holds the budget — the adset, or the campaign
+    // when it uses Advantage campaign budget.
+    setBudget: (id, dailyBudget, account) =>
+      request(`/final-data/budget/${encodeURIComponent(id)}`, {
         method: 'PUT',
         body: { dailyBudget, account },
       }),

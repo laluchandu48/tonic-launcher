@@ -145,9 +145,11 @@ export default function FinalData() {
   };
 
   const openBudget = (row) => {
-    if (row.dailyBudget == null) return;   // campaign-level budget: not ours to set
+    // Lifetime budgets are not editable here; Meta needs a different field and
+    // changing one mid-flight has consequences this screen can't explain well.
+    if (row.budget == null || row.budgetType !== 'daily') return;
     setEditingBudget(row.adsetId);
-    setBudgetDraft(String(row.dailyBudget));
+    setBudgetDraft(String(row.budget));
   };
 
   const saveBudget = async (row) => {
@@ -156,22 +158,29 @@ export default function FinalData() {
       toast.error('Enter a daily budget greater than zero.');
       return;
     }
-    if (amount === row.dailyBudget) {
+    if (amount === row.budget) {
       setEditingBudget(null);
       return;
     }
 
     setSavingBudget(true);
     try {
-      const res = await api.finalData.setBudget(row.adsetId, amount, accountId);
-      // Patch the row in place rather than refetching — a full reload would
-      // re-pull every Tonic day for one number.
+      const res = await api.finalData.setBudget(row.budgetOwnerId, amount, accountId);
+      // Patch in place rather than refetching — a reload would re-pull every
+      // Tonic day for one number. Every row sharing this budget updates, since
+      // a campaign budget is one number behind several adsets.
       setData((d) => ({
         ...d,
-        rows: d.rows.map((r) => (r.adsetId === row.adsetId ? { ...r, dailyBudget: res.dailyBudget } : r)),
+        rows: d.rows.map((r) =>
+          r.budgetOwnerId === row.budgetOwnerId ? { ...r, budget: res.budget } : r
+        ),
       }));
       setEditingBudget(null);
-      toast.success(`${row.adsetName || row.adsetId} daily budget set to ${money(res.dailyBudget)}.`);
+      toast.success(
+        row.budgetLevel === 'campaign'
+          ? `Campaign budget set to ${money(res.budget)} — it covers every adset in ${row.campaignName || 'this campaign'}.`
+          : `${row.adsetName || row.adsetId} daily budget set to ${money(res.budget)}.`
+      );
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -414,23 +423,26 @@ export default function FinalData() {
                         style={{ width: 90, textAlign: 'right', padding: '4px 6px' }}
                         aria-label={`Daily budget for ${r.adsetName || r.adsetId}`}
                       />
-                    ) : r.dailyBudget != null ? (
+                    ) : r.budget != null && r.budgetType === 'daily' ? (
                       <button
                         className="btn btn-ghost"
                         style={{ padding: '2px 6px' }}
                         onClick={() => openBudget(r)}
-                        title="Click to change the daily budget"
+                        title={r.budgetLevel === 'campaign'
+                          ? `Campaign budget for ${r.campaignName || 'this campaign'} — changing it affects every adset in it`
+                          : 'Click to change the daily budget'}
                       >
-                        {money(r.dailyBudget)}
+                        {money(r.budget)}
+                        {r.budgetLevel === 'campaign' && (
+                          <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>CBO</span>
+                        )}
                       </button>
-                    ) : r.lifetimeBudget != null ? (
-                      <span className="muted" title="Lifetime budget — edit it in Ads Manager">
-                        {money(r.lifetimeBudget)} total
+                    ) : r.budget != null ? (
+                      <span className="muted" title="Lifetime budget — change it in Ads Manager">
+                        {money(r.budget)} total
                       </span>
                     ) : (
-                      <span className="muted" title="The campaign holds the budget (Advantage campaign budget), so it cannot be set per adset">
-                        campaign
-                      </span>
+                      <span className="muted" title="No budget found on this adset or its campaign">—</span>
                     )}
                   </td>
                   <td className="num">{money(r.spend)}</td>
@@ -454,7 +466,7 @@ export default function FinalData() {
               <tfoot>
                 <tr className="summary-row">
                   <td className="label" colSpan={2}>Total</td>
-                  <td className="num">{money(t.dailyBudget)}</td>
+                  <td className="num">{money(t.budget)}</td>
                   <td className="num">{money(t.spend)}</td>
                   <td className="num">{money(t.revenue)}</td>
                   <td className={`num ${tone(t.profit)}`}>{money(t.profit)}</td>
