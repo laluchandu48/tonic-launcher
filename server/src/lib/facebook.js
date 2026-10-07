@@ -204,6 +204,14 @@ export class FacebookClient {
     let body = null;
     if (text) { try { body = JSON.parse(text); } catch { body = text; } }
 
+    if (res.ok && body?.error) {
+      const e = body.error;
+      throw new FacebookError(describeError(body, res.status), {
+        status: 502, code: e.code, subcode: e.error_subcode,
+        type: e.type, traceId: e.fbtrace_id, path,
+      });
+    }
+
     if (!res.ok) {
       const e = body?.error || {};
       throw new FacebookError(describeError(body, res.status), {
@@ -381,7 +389,19 @@ export class FacebookClient {
       throw new FacebookError('The budget must be greater than zero.', { status: 400 });
     }
 
-    await this.request(`/${id}`, { daily_budget: amount }, { method: 'POST' });
+    try {
+      await this.request(`/${id}`, { daily_budget: amount }, { method: 'POST' });
+    } catch (err) {
+      if (err instanceof FacebookError && [200, 10, 272, 294].includes(err.code)) {
+        throw new FacebookError(
+          'Facebook refused the change: this token can read the ad account but not change it. '
+          + 'Budget edits need the ads_management permission — regenerate the system user token '
+          + 'with ads_read and ads_management, then save it on the FB Settings screen.',
+          { status: 403, code: err.code, traceId: err.traceId, path: err.path }
+        );
+      }
+      throw err;
+    }
     return { id, dailyBudgetMinor: amount };
   }
 
