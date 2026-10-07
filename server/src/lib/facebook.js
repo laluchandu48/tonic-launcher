@@ -86,8 +86,10 @@ function describeError(body, status) {
     message += ' — the access token is invalid or has expired. Generate a new one and save it on the FB Settings screen.';
   } else if (e.code === 100 && /act_/.test(String(e.message || ''))) {
     message += ' — check the ad account ID.';
-  } else if (e.code === 4 || e.code === 17 || e.code === 613) {
-    message += ' — Facebook is rate limiting this app. Wait a few minutes and try again.';
+  } else if (e.code === 4 || e.code === 17 || e.code === 613 || e.code === 80004) {
+    message += ' — Facebook is rate limiting this app. Apps on the Marketing API\'s '
+      + 'development access tier are held to roughly one call at a time; the limit lifts '
+      + 'once the app is granted Standard or Advanced access.';
   } else if (/API access blocked/i.test(String(e.message || '')) || e.code === 10) {
     // Code 10 is about the *app*, not the token. Saying "add ads_read" here
     // sends people back to the token generator, which is the wrong place.
@@ -136,6 +138,41 @@ export class FacebookClient {
     this.accessToken = accessToken || null;
     this.adAccountId = normaliseAdAccountId(adAccountId);
     this.apiVersion = (apiVersion || DEFAULT_VERSION).trim();
+    // Every call goes through this chain, so only one is ever in flight.
+    this._queue = Promise.resolve();
+    this._accountCache = new Map();
+  }
+
+  /**
+   * Run a call with no other Facebook call in flight.
+   *
+   * An app on the Marketing API's development access tier is held to **one
+   * concurrent request**, so firing insights, adsets, campaigns and account
+   * info together — the obvious thing to do, since they are independent — is
+   * exactly what trips error 613. Serialising costs a little wall-clock time
+   * and removes the failure entirely.
+   */
+  _serialise(run) {
+    const next = this._queue.then(run, run);
+    // Keep the chain alive regardless of outcome; a rejection here must not
+    // poison every later call.
+    this._queue = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  /** Back off and retry the throttling errors, which are worth waiting out. */
+  async _withRetry(run, attempts = 3) {
+    for (let i = 0; ; i += 1) {
+      try {
+        return await run();
+      } catch (err) {
+        const throttled = err instanceof FacebookError && [4, 17, 613, 80004].includes(err.code);
+        if (!throttled || i >= attempts - 1) throw err;
+        // 2s, then 8s. Long enough to clear a burst, short enough that a page
+        // load does not look hung.
+        await new Promise((r) => setTimeout(r, 2000 * 4 ** i));
+      }
+    }
   }
 
   /**
@@ -154,6 +191,10 @@ export class FacebookClient {
   }
 
   async requestUrl(url, path, { method = 'GET' } = {}) {
+    return this._serialise(() => this._withRetry(() => this._send(url, path, method)));
+  }
+
+  async _send(url, path, method) {
     const res = await fetchOrExplain(url, {
       method,
       headers: { Authorization: `Bearer ${this.accessToken}` },
@@ -192,13 +233,20 @@ export class FacebookClient {
   async getAccountInfo(accountId) {
     const account = normaliseAdAccountId(accountId) || this.adAccountId;
     if (!account) throw new FacebookError('No ad account selected.', { status: 428 });
+
+    const cached = this._accountCache.get(account);
+    if (cached) return cached;
+
     const data = await this.request(`/${account}`, { fields: 'name,currency' });
-    return {
+    const info = {
       id: account,
       name: data?.name || null,
       currency: data?.currency || 'USD',
       minorUnits: minorUnitsPerUnit(data?.currency),
     };
+    // A currency does not change. Caching it removes one call per page load.
+    this._accountCache.set(account, info);
+    return info;
   }
 
   /**

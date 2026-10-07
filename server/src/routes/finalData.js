@@ -170,16 +170,25 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     // Not fatal — it only decides what gets cached.
   }
 
-  const [fb, meta, campaignMeta, account, tonicFill] = await Promise.all([
-    getFbClient().getAdsetInsights({ since: from, until: to, accountId }),
-    // Status and budget are not Insights fields, so they come from the adsets
-    // edge and are merged. A failure here must not cost the whole report.
-    getFbClient().getAdsetMeta(accountId).catch(() => new Map()),
-    // With Advantage campaign budget the adset has no budget of its own.
-    getFbClient().getCampaignMeta(accountId).catch(() => new Map()),
-    getFbClient().getAccountInfo(accountId).catch(() => ({ currency: 'USD', minorUnits: 100 })),
+  // Tonic and Facebook are different APIs with separate limits, so those two
+  // run together. Within Facebook the client serialises calls itself — an app
+  // on the development access tier allows only one at a time.
+  const [fbSide, tonicFill] = await Promise.all([
+    (async () => {
+      const insights = await getFbClient().getAdsetInsights({ since: from, until: to, accountId });
+      // Status and budget are not Insights fields, so they come from the
+      // adsets and campaigns edges. A failure in either must not cost the
+      // whole report — the numbers still stand without them.
+      const meta = await getFbClient().getAdsetMeta(accountId).catch(() => new Map());
+      const campaignMeta = await getFbClient().getCampaignMeta(accountId).catch(() => new Map());
+      const account = await getFbClient().getAccountInfo(accountId)
+        .catch(() => ({ currency: 'USD', minorUnits: 100 }));
+      return { insights, meta, campaignMeta, account };
+    })(),
     ensureTonicRange(from, to, param, lastFinalDate),
   ]);
+
+  const { insights: fb, meta, campaignMeta, account } = fbSide;
 
   const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
 
