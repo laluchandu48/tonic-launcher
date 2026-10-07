@@ -40,6 +40,27 @@ const statusTone = (s) => {
 
 const statusLabel = (s) => String(s || '').toLowerCase().replace(/_/g, ' ') || '—';
 
+/**
+ * Every column, in display order. `numeric` decides the comparator and the
+ * default direction: a number column opens largest-first, because the question
+ * is almost always "where is the money", while a name opens A–Z.
+ */
+const COLUMNS = [
+  { key: 'adsetName',   label: 'Adset' },
+  { key: 'status',      label: 'Status' },
+  { key: 'budget',      label: 'Budget',  numeric: true },
+  { key: 'spend',       label: 'Spend',   numeric: true },
+  { key: 'revenue',     label: 'Revenue', numeric: true },
+  { key: 'profit',      label: 'Profit',  numeric: true },
+  { key: 'roi',         label: 'ROI',     numeric: true },
+  { key: 'cpl',         label: 'CPL',     numeric: true, title: 'Spend ÷ Tonic conversions' },
+  { key: 'rpc',         label: 'RPC',     numeric: true, title: 'Revenue ÷ Tonic conversions' },
+  { key: 'leads',       label: 'Leads',   numeric: true, title: 'Leads reported by Facebook' },
+  { key: 'conversions', label: 'Conv.',   numeric: true, title: 'Tonic session clicks' },
+  { key: 'impressions', label: 'Impr.',   numeric: true },
+  { key: 'clicks',      label: 'Clicks',  numeric: true },
+];
+
 const money = (n) => `${Number(n || 0).toFixed(2)} $`;
 const int = (n) => Number(n || 0).toLocaleString();
 const dash = <span className="muted">—</span>;
@@ -56,6 +77,7 @@ export default function FinalData() {
   const [today, setToday] = useState('');
   const [search, setSearch] = useState('');
   const [onlyMatched, setOnlyMatched] = useState(false);
+  const [sort, setSort] = useState({ key: 'spend', dir: 'desc' });
 
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
@@ -198,8 +220,32 @@ export default function FinalData() {
           .some((v) => String(v || '').toLowerCase().includes(q))
       );
     }
-    return list;
-  }, [data, onlyMatched, search]);
+    const col = COLUMNS.find((c) => c.key === sort.key);
+    const sign = sort.dir === 'asc' ? 1 : -1;
+
+    return [...list].sort((a, b) => {
+      const x = a[sort.key];
+      const y = b[sort.key];
+
+      // A missing value is not a small one — an adset with no CPL hasn't got
+      // the cheapest leads. Blanks sink to the bottom either way.
+      const xMissing = x == null || x === '';
+      const yMissing = y == null || y === '';
+      if (xMissing || yMissing) return xMissing && yMissing ? 0 : xMissing ? 1 : -1;
+
+      if (col?.numeric) return (Number(x) - Number(y)) * sign;
+      return String(x).localeCompare(String(y), undefined, { sensitivity: 'base' }) * sign;
+    });
+  }, [data, onlyMatched, search, sort]);
+
+  /** First click sorts the way that column is usually read; second reverses. */
+  const toggleSort = (col) => {
+    setSort((s) =>
+      s.key === col.key
+        ? { key: col.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+        : { key: col.key, dir: col.numeric ? 'desc' : 'asc' }
+    );
+  };
 
   if (blocked) {
     return (
@@ -285,14 +331,6 @@ export default function FinalData() {
 
       {t && (
         <div className="stats">
-          <div className="stat">
-            <div className="stat-label">Spend</div>
-            <div className="stat-value">{money(t.spend)}</div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Revenue</div>
-            <div className="stat-value">{money(t.revenue)}</div>
-          </div>
           <div className="stat">
             <div className="stat-label">Profit</div>
             <div className={`stat-value ${tone(t.profit)}`}>{money(t.profit)}</div>
@@ -380,19 +418,23 @@ export default function FinalData() {
           <table>
             <thead>
               <tr>
-                <th>Adset</th>
-                <th>Status</th>
-                <th className="num">Budget</th>
-                <th className="num">Spend</th>
-                <th className="num">Revenue</th>
-                <th className="num">Profit</th>
-                <th className="num">ROI</th>
-                <th className="num" title="Spend ÷ Tonic conversions">CPL</th>
-                <th className="num" title="Revenue ÷ Tonic conversions">RPC</th>
-                <th className="num" title="Leads reported by Facebook">Leads</th>
-                <th className="num" title="Tonic session clicks">Conv.</th>
-                <th className="num">Impr.</th>
-                <th className="num">Clicks</th>
+                {COLUMNS.map((col) => (
+                  <th
+                    key={col.key}
+                    className={col.numeric ? 'num' : undefined}
+                    title={col.title}
+                    aria-sort={sort.key === col.key
+                      ? (sort.dir === 'asc' ? 'ascending' : 'descending')
+                      : 'none'}
+                  >
+                    <button className="th-sort" onClick={() => toggleSort(col)}>
+                      {col.label}
+                      <span className={`sort-arrow ${sort.key === col.key ? 'on' : ''}`}>
+                        {sort.key === col.key ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}
+                      </span>
+                    </button>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
