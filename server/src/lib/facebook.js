@@ -406,6 +406,33 @@ export class FacebookClient {
   }
 
   /**
+   * Turn an adset on or off. Only ACTIVE and PAUSED are offered: ARCHIVED and
+   * DELETED are one-way doors and have no business behind a row toggle.
+   */
+  async setAdsetStatus(adsetId, active) {
+    const id = String(adsetId || '').trim();
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) {
+      throw new FacebookError('Not a valid adset ID.', { status: 400 });
+    }
+
+    const status = active ? 'ACTIVE' : 'PAUSED';
+    try {
+      await this.request(`/${id}`, { status }, { method: 'POST' });
+    } catch (err) {
+      if (err instanceof FacebookError && [200, 10, 272, 294].includes(err.code)) {
+        throw new FacebookError(
+          'Facebook refused the change: this token can read the ad account but not change it. '
+          + 'Turning adsets on and off needs the ads_management permission — regenerate the '
+          + 'system user token with ads_read and ads_management, then save it on FB Settings.',
+          { status: 403, code: err.code, traceId: err.traceId, path: err.path }
+        );
+      }
+      throw err;
+    }
+    return { id, status };
+  }
+
+  /**
    * One row per adset for the whole range (time_increment=all_days), which is
    * what the Final Data table shows. Per-day rows would be 30x the volume for
    * a breakdown nothing currently displays.

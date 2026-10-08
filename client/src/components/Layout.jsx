@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import ThemeToggle from './ThemeToggle.jsx';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: '▦', end: true },
@@ -11,7 +12,7 @@ const NAV = [
   { to: '/account',   label: 'Account',   icon: '◉' },
 ];
 
-export default function Layout({ title, actions, children }) {
+export default function Layout({ title, tools, actions, children }) {
   return (
     <div className="shell">
       <nav className="sidebar">
@@ -33,7 +34,14 @@ export default function Layout({ title, actions, children }) {
       <div className="main">
         <header className="topbar">
           <h1>{title}</h1>
-          <div>{actions}</div>
+          {/* Page-specific controls sit to the right, the way an analytics
+              tool puts its account and date pickers — out of the content,
+              always in the same place. */}
+          <div className="topbar-tools">
+            {tools}
+            <ThemeToggle />
+            {actions}
+          </div>
         </header>
         <main className="content">{children}</main>
       </div>

@@ -120,6 +120,12 @@ export const api = {
         method: 'PUT',
         body: { dailyBudget, account },
       }),
+
+    setAdsetStatus: (adsetId, active) =>
+      request(`/final-data/adsets/${encodeURIComponent(adsetId)}/status`, {
+        method: 'PUT',
+        body: { active },
+      }),
   },
 
   fbSettings: {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout.jsx';
 import SearchBox from '../components/SearchBox.jsx';
+import Switch from '../components/Switch.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { api } from '../lib/api.js';
 
@@ -46,8 +47,8 @@ const statusLabel = (s) => String(s || '').toLowerCase().replace(/_/g, ' ') || '
  * is almost always "where is the money", while a name opens A–Z.
  */
 const COLUMNS = [
+  { key: 'status',      label: 'On', sortable: false },
   { key: 'adsetName',   label: 'Adset' },
-  { key: 'status',      label: 'Status' },
   { key: 'budget',      label: 'Budget',  numeric: true },
   { key: 'spend',       label: 'Spend',   numeric: true },
   { key: 'revenue',     label: 'Revenue', numeric: true },
@@ -71,7 +72,8 @@ const tone = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : '');
 export default function FinalData() {
   const toast = useToast();
 
-  const [rangeKey, setRangeKey] = useState('last30');
+  // Opens on today; the first question is almost always "how is it doing now".
+  const [rangeKey, setRangeKey] = useState('today');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [today, setToday] = useState('');
@@ -88,6 +90,7 @@ export default function FinalData() {
   const [editingBudget, setEditingBudget] = useState(null);
   const [budgetDraft, setBudgetDraft] = useState('');
   const [savingBudget, setSavingBudget] = useState(false);
+  const [togglingAdset, setTogglingAdset] = useState(null);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -125,7 +128,13 @@ export default function FinalData() {
   }, [rangeKey, customFrom, customTo, today]);
 
   const load = useCallback(async () => {
-    if (!range || !accountId) return;
+    // Nothing to fetch without an account. Clear the spinner rather than
+    // leaving it turning forever, which is what a bare return did.
+    if (!accountId) {
+      if (!accountsLoading) setLoading(false);
+      return;
+    }
+    if (!range) return;
     setLoading(true);
     try {
       setData(await api.finalData.get({ ...range, account: accountId }));
@@ -138,7 +147,7 @@ export default function FinalData() {
     } finally {
       setLoading(false);
     }
-  }, [range, accountId]);
+  }, [range, accountId, accountsLoading]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -210,6 +219,22 @@ export default function FinalData() {
     }
   };
 
+  const toggleAdset = async (row, active) => {
+    setTogglingAdset(row.adsetId);
+    try {
+      const res = await api.finalData.setAdsetStatus(row.adsetId, active);
+      setData((d) => ({
+        ...d,
+        rows: d.rows.map((r) => (r.adsetId === row.adsetId ? { ...r, status: res.status } : r)),
+      }));
+      toast.success(`${row.adsetName || row.adsetId} ${active ? 'turned on' : 'paused'}.`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setTogglingAdset(null);
+    }
+  };
+
   const rows = useMemo(() => {
     let list = data?.rows || [];
     if (onlyMatched) list = list.filter((r) => r.matched);
@@ -269,6 +294,24 @@ export default function FinalData() {
   return (
     <Layout
       title="Final Data"
+      tools={
+        <select
+          className="topbar-select"
+          value={accountId}
+          onChange={(e) => chooseAccount(e.target.value)}
+          disabled={accountsLoading || accounts.length === 0}
+          aria-label="Ad account"
+          title={currentAccount ? `${currentAccount.name} · ${currentAccount.id}` : 'Ad account'}
+        >
+          {accountsLoading && <option value="">Loading…</option>}
+          {!accountsLoading && accounts.length === 0 && <option value="">No ad accounts</option>}
+          {visibleAccounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}{a.currency ? ` (${a.currency})` : ''}{a.active ? '' : ' — inactive'}
+            </option>
+          ))}
+        </select>
+      }
       actions={
         <button className="btn btn-secondary" onClick={load} disabled={loading}>
           {loading && <span className="spinner" />}
@@ -276,59 +319,6 @@ export default function FinalData() {
         </button>
       }
     >
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
-          <div className="toolbar" style={{ flexWrap: 'wrap' }}>
-            <label htmlFor="fd-account" style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
-              Ad account
-            </label>
-            <select
-              id="fd-account"
-              value={accountId}
-              onChange={(e) => chooseAccount(e.target.value)}
-              disabled={accountsLoading || accounts.length === 0}
-              style={{ width: 'auto', minWidth: 280 }}
-            >
-              {accountsLoading && <option value="">Loading…</option>}
-              {!accountsLoading && accounts.length === 0 && <option value="">No ad accounts</option>}
-              {visibleAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}{a.currency ? ` (${a.currency})` : ''}{a.active ? '' : ' — inactive'}
-                </option>
-              ))}
-            </select>
-
-            {/* An agency token can see hundreds of accounts, so the list is
-                filterable rather than something to scroll through. */}
-            {accounts.length > 8 && (
-              <input
-                type="search"
-                value={accountFilter}
-                placeholder="Filter accounts…"
-                onChange={(e) => setAccountFilter(e.target.value)}
-                style={{ width: 'auto', minWidth: 180 }}
-                aria-label="Filter ad accounts"
-              />
-            )}
-          </div>
-
-          {currentAccount && (
-            <div className="muted mono" style={{ fontSize: 12 }}>
-              {currentAccount.id}
-              {accountFilter && visibleAccounts.length !== accounts.length &&
-                ` · ${visibleAccounts.length} of ${accounts.length} shown`}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {(data?.notes || []).map((note, i) => (
-        <div className="banner banner-warn" key={i}>
-          <span>⚠</span>
-          <div>{note}</div>
-        </div>
-      ))}
-
       <div className="card">
         <div className="card-head" style={{ flexWrap: 'wrap' }}>
           <div className="toolbar">
@@ -397,6 +387,15 @@ export default function FinalData() {
 
         {loading ? (
           <div className="empty">Loading…</div>
+        ) : accounts.length === 0 ? (
+          <div className="empty">
+            <p>No ad accounts are reachable with the current Facebook token.</p>
+            <p className="hint">
+              Check the token on the <Link to="/fb-settings">FB Settings</Link> screen. If it
+              reports “API access blocked”, the Meta app behind the token needs the Marketing
+              API product added.
+            </p>
+          </div>
         ) : rows.length === 0 ? (
           <div className="empty">
             <p>No adsets with spend in this range.</p>
@@ -414,12 +413,14 @@ export default function FinalData() {
                       ? (sort.dir === 'asc' ? 'ascending' : 'descending')
                       : 'none'}
                   >
-                    <button className="th-sort" onClick={() => toggleSort(col)}>
-                      {col.label}
-                      <span className={`sort-arrow ${sort.key === col.key ? 'on' : ''}`}>
-                        {sort.key === col.key ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}
-                      </span>
-                    </button>
+                    {col.sortable === false ? col.label : (
+                      <button className="th-sort" onClick={() => toggleSort(col)}>
+                        {col.label}
+                        <span className={`sort-arrow ${sort.key === col.key ? 'on' : ''}`}>
+                          {sort.key === col.key ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}
+                        </span>
+                      </button>
+                    )}
                   </th>
                 ))}
               </tr>
@@ -429,10 +430,25 @@ export default function FinalData() {
                 <tr key={r.adsetId}>
                   <td>
                     {r.adsetName || <span className="mono">{r.adsetId}</span>}
-                    <div className="muted mono" style={{ fontSize: 11 }}>{r.adsetId}</div>
+                    <div className="muted mono" style={{ fontSize: 11 }}>
+                      {r.adsetId}
+                      {/* The delivery state still matters when it is not simply
+                          on or off — a campaign-level pause is not the adset's
+                          own doing, and the switch cannot show that. */}
+                      {!['ACTIVE', 'PAUSED'].includes(String(r.status || '').toUpperCase()) && (
+                        <span className={`badge ${statusTone(r.status)}`} style={{ marginLeft: 6 }}>
+                          {statusLabel(r.status)}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
-                    <span className={`badge ${statusTone(r.status)}`}>{statusLabel(r.status)}</span>
+                    <Switch
+                      checked={String(r.status || '').toUpperCase() === 'ACTIVE'}
+                      busy={togglingAdset === r.adsetId}
+                      onChange={(v) => toggleAdset(r, v)}
+                      label={`${r.adsetName || r.adsetId} — ${statusLabel(r.status)}`}
+                    />
                   </td>
                   <td className="num">
                     {editingBudget === r.adsetId ? (
@@ -494,7 +510,7 @@ export default function FinalData() {
             {t && (
               <tfoot>
                 <tr className="summary-row">
-                  <td className="label" colSpan={2}>Total</td>
+                  <td className="label" colSpan={3}>Total</td>
                   <td className="num">{money(t.budget)}</td>
                   <td className="num">{money(t.spend)}</td>
                   <td className="num">{money(t.revenue)}</td>
@@ -546,6 +562,11 @@ export default function FinalData() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {(data?.notes || []).length > 0 && (
+        <div className="footnotes">
+          {data.notes.map((note, i) => <p className="note" key={i}>{note}</p>)}
         </div>
       )}
     </Layout>

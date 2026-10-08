@@ -17,8 +17,46 @@
   --warn-ink:      #8a5a12;
   --bad:           #fdeaea;
   --bad-ink:       #a32020;
+  --surface-2:     #fafcfc;   /* row hover, zebra */
+  --row-total:     #f6f9fa;   /* totals row */
+  --line-soft:     #f0f4f5;   /* between table rows */
+  --pos-ink:       #14603a;
+  --chip-on:       #d6f0e4;
+  --chip-on-line:  #aedcc6;
+  --chip-on-ink:   #14603a;
   --radius:        8px;
   --sidebar-w:     220px;
+}
+
+/*
+ * Dark theme. Everything above is a token precisely so this is a swap rather
+ * than a second stylesheet; `data-theme` is set on <html> before first paint
+ * by a snippet in index.html, so there is no flash of the wrong theme.
+ */
+:root[data-theme="dark"] {
+  --chrome:        #0b1f29;
+  --chrome-deep:   #081821;
+  --chrome-line:   #17303c;
+  --accent:        #2b9dac;
+  --accent-hover:  #36b2c2;
+  --ink:           #e4ecf0;
+  --ink-soft:      #94aab6;
+  --line:          #22333c;
+  --surface:       #12242e;
+  --surface-2:     #162b36;
+  --row-total:     #162b36;
+  --line-soft:     #1b2a32;
+  --canvas:        #0d1d26;
+  --ok:            #10351f;
+  --ok-ink:        #6fe3a2;
+  --warn:          #3a2e14;
+  --warn-ink:      #e9c67f;
+  --bad:           #3a1c1c;
+  --bad-ink:       #f08c8c;
+  --pos-ink:       #5fd79a;
+  --chip-on:       #11433a;
+  --chip-on-line:  #1d6b58;
+  --chip-on-ink:   #80e1be;
 }
 
 * { box-sizing: border-box; }
@@ -125,10 +163,11 @@ body {
 .card-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .card-body { padding: 18px; }
 
-table { width: 100%; border-collapse: collapse; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th {
   text-align: left;
-  font-size: 12px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
   font-weight: 600;
   color: var(--ink-soft);
   padding: 11px 14px;
@@ -136,12 +175,12 @@ th {
   white-space: nowrap;
 }
 td {
-  padding: 12px 14px;
-  border-bottom: 1px solid #f0f4f5;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
   vertical-align: middle;
 }
 tr:last-child td { border-bottom: none; }
-tbody tr:hover { background: #fafcfc; }
+tbody tr:hover { background: var(--surface-2); }
 
 .empty { padding: 44px 18px; text-align: center; color: var(--ink-soft); }
 .empty p { margin: 0 0 14px; }
@@ -164,11 +203,11 @@ tbody tr:hover { background: #fafcfc; }
 }
 .btn:hover:not(:disabled) { background: var(--accent-hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-secondary { background: #fff; color: var(--ink); border-color: var(--line); }
-.btn-secondary:hover:not(:disabled) { background: #f4f7f8; }
+.btn-secondary { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn-secondary:hover:not(:disabled) { background: var(--surface-2); }
 .btn-ghost { background: transparent; color: var(--accent); padding: 6px 8px; }
-.btn-ghost:hover:not(:disabled) { background: #eef6f7; }
-.btn-danger { background: #fff; color: var(--bad-ink); border-color: #f0cfcf; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); }
+.btn-danger { background: var(--surface); color: var(--bad-ink); border-color: var(--line); }
 
 .field { margin-bottom: 18px; }
 .field > label {
@@ -179,7 +218,11 @@ tbody tr:hover { background: #fafcfc; }
 }
 .field .hint { font-size: 12px; color: var(--ink-soft); margin: 0 0 8px; line-height: 1.5; }
 
-input[type="text"], input[type="password"], input[type="url"], select, textarea {
+/* Every input type the app uses. Listing them individually is what let
+   search and number boxes keep a hard-coded white background. */
+input[type="text"], input[type="password"], input[type="url"],
+input[type="search"], input[type="number"], input[type="date"],
+input[type="email"], input:not([type]), select, textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -187,14 +230,14 @@ input[type="text"], input[type="password"], input[type="url"], select, textarea 
   font-size: 13px;
   font-family: inherit;
   color: var(--ink);
-  background: #fff;
+  background: var(--surface);
 }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(15, 123, 138, 0.12);
 }
-input:disabled, select:disabled { background: #f6f8f9; color: var(--ink-soft); }
+input:disabled, select:disabled { background: var(--surface-2); color: var(--ink-soft); }
 textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
 
 .invalid { border-color: #d46b6b !important; }
@@ -231,7 +274,7 @@ textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
 }
 .drawer {
   width: min(620px, 100%);
-  background: #fff;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   box-shadow: -8px 0 28px rgba(0, 0, 0, 0.16);
@@ -290,7 +333,7 @@ textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
 /* ─── Misc ────────────────────────────────────────────────────────────────── */
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 20px; }
-.stat { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
 .stat-label { font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
 .stat-value { font-size: 26px; font-weight: 600; }
 
@@ -344,7 +387,7 @@ th.num { text-align: right; }
 
 .chip {
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   border-radius: 6px;
   padding: 7px 15px;
@@ -353,12 +396,12 @@ th.num { text-align: right; }
   cursor: pointer;
   text-transform: capitalize;
 }
-.chip:hover { background: #f4f7f8; }
-.chip.on { background: #d6f0e4; border-color: #aedcc6; color: #14603a; font-weight: 500; }
+.chip:hover { background: var(--surface-2); }
+.chip.on { background: var(--chip-on); border-color: var(--chip-on-line); color: var(--chip-on-ink); font-weight: 500; }
 
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button {
-  background: #fff;
+  background: var(--surface);
   border: none;
   border-right: 1px solid var(--line);
   padding: 7px 17px;
@@ -370,12 +413,12 @@ th.num { text-align: right; }
 .seg button:last-child { border-right: none; }
 .seg button.on { background: var(--chrome); color: #fff; }
 
-tr.summary-row td { background: #f6f9fa; font-weight: 600; border-top: 1px solid var(--line); }
+tr.summary-row td { background: var(--row-total); font-weight: 600; border-top: 1px solid var(--line); }
 tr.summary-row td.label { text-align: right; color: var(--ink-soft); font-weight: 500; }
 
 /* Profit and ROI read at a glance; everything else stays monochrome so these
    two carry the meaning rather than competing with the rest of the table. */
-.pos { color: #14603a; }
+.pos { color: var(--pos-ink); }
 .neg { color: var(--bad-ink); }
 
 /* The same hint style outside a form field. */
@@ -409,7 +452,7 @@ th.num .th-sort { justify-content: flex-end; }
   display: grid;
   place-items: center;
   padding: 24px;
-  background: var(--bg, #f3f6f7);
+  background: var(--canvas);
 }
 .login-card { width: 100%; max-width: 360px; padding: 28px; }
 .login-card .brand { color: var(--ink); }
@@ -433,7 +476,7 @@ th.num .th-sort { justify-content: flex-end; }
   color: var(--ink-soft);
   cursor: pointer;
 }
-.pw-toggle:hover { color: var(--ink); background: #f1f5f6; }
+.pw-toggle:hover { color: var(--ink); background: var(--surface-2); }
 
 /* ─── Narrow screens ──────────────────────────────────────────────────────── */
 
@@ -493,3 +536,77 @@ th.num .th-sort { justify-content: flex-end; }
   .stats { grid-template-columns: 1fr; }
   .login-card { padding: 22px; }
 }
+
+/* ─── Top bar tools, theme switch, row switch ─────────────────────────────── */
+
+.topbar-tools { display: flex; align-items: center; gap: 10px; }
+
+/* The account picker lives up here, so it has to read on the dark chrome. */
+.topbar-select {
+  width: auto;
+  min-width: 170px;
+  max-width: 260px;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--chrome-line);
+  border-radius: 7px;
+}
+.topbar-select:hover { background: rgba(255, 255, 255, 0.14); }
+.topbar-select option { color: var(--ink); background: var(--surface); }
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--chrome-line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.16); }
+
+/* Row on/off. A real checkbox drives it; this only draws it. */
+.switch { display: inline-flex; align-items: center; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 120ms ease;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 120ms ease;
+}
+.switch input:checked + .switch-track { background: var(--accent); }
+.switch input:checked + .switch-track .switch-knob { transform: translateX(15px); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:disabled + .switch-track { opacity: 0.5; cursor: not-allowed; }
+.switch.busy { opacity: 0.6; }
+
+/* The finalisation note sits under the table rather than above it — it is a
+   footnote about the numbers, not something to read before them. */
+.footnotes { margin-top: 14px; display: grid; gap: 8px; }
+.footnotes .note {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.6;
+  padding-left: 18px;
+  position: relative;
+}
+.footnotes .note::before { content: '⚠'; position: absolute; left: 0; opacity: 0.7; }

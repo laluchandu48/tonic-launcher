@@ -359,4 +359,14 @@ router.put('/budget/:id', requireFbCredentials, asyncRoute(async (req, res) => {
   });
 }));
 
+/** Turn an adset on or off from its row. */
+router.put('/adsets/:id/status', requireFbCredentials, asyncRoute(async (req, res) => {
+  const active = req.body?.active;
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({ error: 'Send active: true or false.' });
+  }
+  const result = await getFbClient().setAdsetStatus(req.params.id, active);
+  res.json({ ok: true, adsetId: result.id, status: result.status });
+}));
+
 export default router;
