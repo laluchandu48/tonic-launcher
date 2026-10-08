@@ -518,9 +518,9 @@ th.num .th-sort { justify-content: flex-end; }
 
   .content { padding: 14px 12px 32px; border-top-left-radius: 0; }
 
-  /* Tables keep real column widths and scroll within their card. */
-  .card { overflow-x: auto; }
-  .card table { min-width: 760px; }
+  /* Pages whose tables have no scroll container of their own. */
+  .card > table { min-width: 760px; }
+  .card:not(:has(.table-scroll)) { overflow-x: auto; }
 
   /* Toolbars wrap rather than overflow. */
   .card-head { flex-wrap: wrap; gap: 10px; }
@@ -610,3 +610,43 @@ th.num .th-sort { justify-content: flex-end; }
   position: relative;
 }
 .footnotes .note::before { content: '⚠'; position: absolute; left: 0; opacity: 0.7; }
+
+/* ─── Wide tables ─────────────────────────────────────────────────────────── */
+
+/*
+ * Horizontal scrolling for tables too wide for the viewport. The container
+ * scrolls, not the page, so the sidebar and toolbar stay where they are. The
+ * min-width keeps columns at a readable size rather than letting them
+ * compress — a squeezed column is useless, a scrolled one is a swipe away.
+ */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* A visible, thin scrollbar: on a phone there is no other hint that
+     there is more to the right. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.table-scroll table { min-width: 1080px; }
+
+.table-scroll::-webkit-scrollbar { height: 8px; }
+.table-scroll::-webkit-scrollbar-track { background: transparent; }
+.table-scroll::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+.table-scroll::-webkit-scrollbar-thumb:hover { background: var(--ink-soft); }
+
+/* The first two columns stay put while the numbers scroll past, so a row is
+   always identifiable. */
+@media (min-width: 640px) {
+  .table-scroll th:nth-child(2),
+  .table-scroll td:nth-child(2) {
+    position: sticky;
+    left: 0;
+    background: var(--surface);
+    z-index: 1;
+  }
+  .table-scroll tbody tr:hover td:nth-child(2) { background: var(--surface-2); }
+  .table-scroll tr.summary-row td:nth-child(2) { background: var(--row-total); }
+}

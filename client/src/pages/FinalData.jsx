@@ -401,6 +401,10 @@ export default function FinalData() {
             <p>No adsets with spend in this range.</p>
           </div>
         ) : (
+          /* Thirteen columns do not fit a phone, and compressing them makes
+             every one unreadable. The table keeps real widths and scrolls
+             inside this container; the toolbar above it stays put. */
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -529,6 +533,7 @@ export default function FinalData() {
               </tfoot>
             )}
           </table>
+          </div>
         )}
       </div>
 
@@ -545,6 +550,7 @@ export default function FinalData() {
             traffic from elsewhere, an adset outside the range, or a tracking link that is not
             passing the adset ID. <code>(not set)</code> means the parameter was missing entirely.
           </p>
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -565,6 +571,7 @@ export default function FinalData() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
       {(data?.notes || []).length > 0 && (
