@@ -510,7 +510,10 @@ export default function FinalData() {
             {t && (
               <tfoot>
                 <tr className="summary-row">
-                  <td className="label" colSpan={3}>Total</td>
+                  {/* Spans On + Adset only. COLUMNS.length must equal this
+                      span plus the data cells below, or every total lands one
+                      column to the right of what it is totalling. */}
+                  <td className="label" colSpan={2}>Total</td>
                   <td className="num">{money(t.budget)}</td>
                   <td className="num">{money(t.spend)}</td>
                   <td className="num">{money(t.revenue)}</td>
