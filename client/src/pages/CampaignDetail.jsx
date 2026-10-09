@@ -20,10 +20,36 @@ const PLACEHOLDERS = ['{campaign_id}', '{campaign_name}', '{type}', '{timestamp}
 const LOCATION_PARAMS = ['{city}', '{in city}', '{country}', '{in country}', '{state}', '{in state}'];
 
 /**
+ * Standard Meta events. The API types these as plain strings, so the list is a
+ * suggestion rather than a constraint — hence a datalist, not a select.
+ */
+const META_EVENTS = [
+  'PageView', 'ViewContent', 'Search', 'Lead', 'CompleteRegistration',
+  'SubmitApplication', 'Contact', 'Subscribe', 'Purchase', 'AddToCart',
+];
+
+/**
+ * A sensible starting point for the three additional events, matching what
+ * each Tonic event actually is. Offered as defaults to fill in, not presented
+ * as Tonic's own recommendation — that mapping lives in their dashboard and
+ * guessing at it under their name would be inventing authority.
+ */
+const SUGGESTED_ADDITIONAL = {
+  redirectEventType: 'PageView',
+  viewEventType: 'ViewContent',
+  viewRtEventType: 'Search',
+};
+
+/**
  * Tracking targets, taken field-for-field from the v4 spec's *TrackingTarget
  * schemas. Each one is sent as `traffic.trackingTarget` with its `name`, and
  * the API validates the rest — so the form is generated from this table rather
  * than hand-written per network.
+ *
+ * Note: `docs/tonic-v4-openapi.json` in this repo is spec 4.16.1 and is behind
+ * the live API — the three additional-event fields below exist on Tonic's
+ * current FacebookTrackingTarget but not in that file. Re-extract the spec
+ * before trusting it for anything new.
  */
 const TRACKING_TARGETS = {
   facebook: {
@@ -35,6 +61,16 @@ const TRACKING_TARGETS = {
       { key: 'pixelId', label: 'Pixel ID', required: true },
       { key: 'accessToken', label: 'Access token', required: true, secret: true },
       { key: 'domainVerificationToken', label: 'Domain verification token', required: false },
+
+      // Tonic's dashboard calls these "Additional events". Each maps to one of
+      // the events the campaign already fires, so the label names both: what
+      // Tonic calls it, and what actually triggers it.
+      { key: 'redirectEventType', label: 'Page opened', section: 'Additional events', options: META_EVENTS,
+        hint: 'Fired on redirect, when the visitor lands on the article.' },
+      { key: 'viewEventType', label: 'RSoC unit requested', section: 'Additional events', options: META_EVENTS,
+        hint: 'Fired on view, when the keyword page is shown.' },
+      { key: 'viewRtEventType', label: 'Related term clicked', section: 'Additional events', options: META_EVENTS,
+        hint: 'Fired on viewRt, when a related term is clicked.' },
     ],
   },
   tiktok: {
@@ -458,8 +494,23 @@ export default function CampaignDetail() {
                     </div>
                   )}
 
-                  {target && TRACKING_TARGETS[target].fields.map((f) => (
+                  {target && TRACKING_TARGETS[target].fields.map((f, i, all) => (
                     <div className="field" key={f.key}>
+                      {f.section && f.section !== all[i - 1]?.section && (
+                        <div className="card-head" style={{ padding: '4px 0 10px', borderBottom: 0 }}>
+                          <h2 style={{ fontSize: 13 }}>
+                            {f.section} <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+                          </h2>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '2px 6px', fontSize: 12 }}
+                            onClick={() => setTargetFields((v) => ({ ...v, ...SUGGESTED_ADDITIONAL }))}
+                          >
+                            Fill with common defaults
+                          </button>
+                        </div>
+                      )}
                       {f.type === 'boolean' ? (
                         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 400 }}>
                           <input
