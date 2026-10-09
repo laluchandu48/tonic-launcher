@@ -19,6 +19,65 @@ const CALLBACK_FIELDS = [
 const PLACEHOLDERS = ['{campaign_id}', '{campaign_name}', '{type}', '{timestamp}', '{device}', '{keyword}', '{event_id}', '{revenue}', '{currency}'];
 const LOCATION_PARAMS = ['{city}', '{in city}', '{country}', '{in country}', '{state}', '{in state}'];
 
+/**
+ * Tracking targets, taken field-for-field from the v4 spec's *TrackingTarget
+ * schemas. Each one is sent as `traffic.trackingTarget` with its `name`, and
+ * the API validates the rest — so the form is generated from this table rather
+ * than hand-written per network.
+ */
+const TRACKING_TARGETS = {
+  facebook: {
+    label: 'Facebook',
+    note: 'New Facebook S2S conversions with default mappings is used.',
+    revenue: true,
+    fields: [
+      { key: 'eventType', label: 'Event type', required: true, options: ['Lead', 'Purchase', 'CompleteRegistration', 'SubmitApplication', 'Contact', 'Subscribe'], hint: 'The standard event Tonic fires on your pixel.' },
+      { key: 'pixelId', label: 'Pixel ID', required: true },
+      { key: 'accessToken', label: 'Access token', required: true, secret: true },
+      { key: 'domainVerificationToken', label: 'Domain verification token', required: false },
+    ],
+  },
+  tiktok: {
+    label: 'TikTok',
+    revenue: true,
+    fields: [
+      { key: 'pixelId', label: 'Pixel ID', required: true },
+      { key: 'accessToken', label: 'Access token', required: true, secret: true },
+    ],
+  },
+  taboola: {
+    label: 'Taboola',
+    fields: [{ key: 'eventName', label: 'Event name', required: true, hint: 'e.g. lead' }],
+  },
+  outbrain: {
+    label: 'Outbrain',
+    fields: [{ key: 'eventBasedConversionName', label: 'Event-based conversion name', required: true }],
+  },
+  gdn: {
+    label: 'Google Ads / GDN',
+    fields: [
+      { key: 'conversionId', label: 'Conversion ID', required: true, hint: 'Unique per Google Ads account.' },
+      { key: 'conversionLabel', label: 'Conversion label', required: true, hint: 'Unique per conversion action.' },
+    ],
+  },
+  mgid: {
+    label: 'MGID',
+    fields: [
+      { key: 'eventName', label: 'Event name', required: true },
+      { key: 'sendRevenue', label: 'Append pre-estimated revenue as the "r" parameter', type: 'boolean' },
+    ],
+  },
+  newsbreak: {
+    label: 'Newsbreak',
+    fields: [{ key: 'eventName', label: 'Event name', required: true, hint: 'e.g. complete_payment' }],
+  },
+};
+
+const REVENUE_TYPES = [
+  { value: 'preEstimatedRevenue', label: 'Pre-Estimated Revenue', hint: 'Sent immediately, least settled.' },
+  { value: 'estimatedRevenue', label: 'Estimated Revenue', hint: 'Sent once Tonic has an estimate — the usual choice.' },
+];
+
 const KEYWORD_MIN = 3;
 const KEYWORD_MAX = 10;
 
@@ -34,6 +93,14 @@ export default function CampaignDetail() {
   const [keywords, setKeywords] = useState([]);
   const [savingKeywords, setSavingKeywords] = useState(false);
 
+  // Tracking target. `target` is the network name ('' = none); `targetFields`
+  // holds whatever that network needs.
+  const [target, setTarget] = useState('');
+  const [targetFields, setTargetFields] = useState({});
+  const [revenueType, setRevenueType] = useState('estimatedRevenue');
+  const [targetErrors, setTargetErrors] = useState({});
+  const [savingTarget, setSavingTarget] = useState(false);
+
   const [callbacks, setCallbacks] = useState({});
   const [savedCallbacks, setSavedCallbacks] = useState({});
   const [callbackErrors, setCallbackErrors] = useState({});
@@ -48,7 +115,10 @@ export default function CampaignDetail() {
       try {
         const result = await api.campaigns.list('pending,active,stopped,deleted', { campaignIds: id });
         const found = (result.rows || [])[0];
-        if (found && !cancelled) setCampaign({ ...found, state: found.status });
+        if (found && !cancelled) {
+          setCampaign({ ...found, state: found.status });
+          hydrateTarget(found.trackingTarget);
+        }
       } catch (err) {
         if (!cancelled) toast.error(err.message);
       }
@@ -93,6 +163,65 @@ export default function CampaignDetail() {
     }
   };
 
+  /** Pull the saved target off the campaign once it loads. */
+  const hydrateTarget = (tt) => {
+    const name = String(tt?.name || '').toLowerCase();
+    if (!TRACKING_TARGETS[name]) {
+      setTarget('');
+      setTargetFields({});
+      return;
+    }
+    setTarget(name);
+    setRevenueType(tt.revenueType || 'estimatedRevenue');
+    setTargetFields(
+      Object.fromEntries(TRACKING_TARGETS[name].fields.map((f) => [f.key, tt[f.key] ?? (f.type === 'boolean' ? false : '')]))
+    );
+  };
+
+  const chooseTarget = (name) => {
+    setTarget(name);
+    setTargetErrors({});
+    setTargetFields(
+      name ? Object.fromEntries(TRACKING_TARGETS[name].fields.map((f) => [f.key, f.type === 'boolean' ? false : ''])) : {}
+    );
+  };
+
+  const saveTarget = async () => {
+    const spec = TRACKING_TARGETS[target];
+
+    // Checked here as well as by Tonic, so a missing pixel ID is caught before
+    // the round trip rather than coming back as a generic validation error.
+    const errors = {};
+    for (const f of spec?.fields || []) {
+      if (f.required && !String(targetFields[f.key] ?? '').trim()) errors[f.key] = 'Required.';
+    }
+    setTargetErrors(errors);
+    if (Object.keys(errors).length) return;
+
+    setSavingTarget(true);
+    try {
+      // An empty selection clears it: the API takes null for "no target".
+      const payload = !target ? null : {
+        name: target,
+        ...Object.fromEntries(
+          spec.fields
+            .map((f) => [f.key, f.type === 'boolean' ? Boolean(targetFields[f.key]) : String(targetFields[f.key] ?? '').trim()])
+            .filter(([, v]) => v !== '')
+        ),
+        ...(spec.revenue ? { revenueType } : {}),
+      };
+
+      const res = await api.campaigns.trackingTarget(id, payload);
+      hydrateTarget(res.trackingTarget);
+      toast.success(target ? `${spec.label} tracking saved.` : 'Tracking target cleared.');
+    } catch (err) {
+      if (err.fields) setTargetErrors(err.fields);
+      toast.error(err.message);
+    } finally {
+      setSavingTarget(false);
+    }
+  };
+
   const saveCallbacks = async () => {
     setSavingCallbacks(true);
     setCallbackErrors({});
@@ -118,7 +247,7 @@ export default function CampaignDetail() {
     }
   };
 
-  const trackingTargetName = campaign?.trackingTarget?.name || null;
+  const trackingTargetName = target ? TRACKING_TARGETS[target]?.label : null;
   const callbacksDirty = CALLBACK_FIELDS.some(
     (f) => (callbacks[f.key] || '') !== (savedCallbacks[f.key] || '')
   );
@@ -264,6 +393,112 @@ export default function CampaignDetail() {
                   <p className="counter">
                     {filledCount} set, {amount - filledCount} filled by Tonic
                   </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Tracking target / pixel ── */}
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div className="card-head">
+              <h2>Tracking Target <span className="muted" style={{ fontWeight: 400 }}>(optional)</span></h2>
+              <button className="btn" onClick={saveTarget} disabled={savingTarget}>
+                {savingTarget && <span className="spinner" />}
+                {savingTarget ? 'Saving…' : 'Save tracking target'}
+              </button>
+            </div>
+
+            <div className="card-body">
+              <div className="row" style={{ alignItems: 'flex-start' }}>
+                <div>
+                  <p className="hint" style={{ marginTop: 0 }}>
+                    Sends conversions straight from Tonic to your ad platform, server to server —
+                    no pixel on the page. Changing the target can override other settings, so
+                    check the callbacks below after saving.
+                  </p>
+                  {target && TRACKING_TARGETS[target].note && (
+                    <p className="hint"><strong>{TRACKING_TARGETS[target].note}</strong></p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="field">
+                    <label htmlFor="tracking-target">Tracking target</label>
+                    <select
+                      id="tracking-target"
+                      value={target}
+                      onChange={(e) => chooseTarget(e.target.value)}
+                    >
+                      <option value="">None</option>
+                      {Object.entries(TRACKING_TARGETS).map(([key, t]) => (
+                        <option key={key} value={key}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {target && TRACKING_TARGETS[target].revenue && (
+                    <div className="field">
+                      <label>Revenue sent</label>
+                      {REVENUE_TYPES.map((r) => (
+                        <label key={r.value} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8, fontWeight: 400 }}>
+                          <input
+                            type="radio"
+                            name="revenueType"
+                            value={r.value}
+                            checked={revenueType === r.value}
+                            onChange={() => setRevenueType(r.value)}
+                            style={{ width: 'auto', marginTop: 3 }}
+                          />
+                          <span>
+                            {r.label}
+                            <span className="hint" style={{ display: 'block' }}>{r.hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {target && TRACKING_TARGETS[target].fields.map((f) => (
+                    <div className="field" key={f.key}>
+                      {f.type === 'boolean' ? (
+                        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 400 }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(targetFields[f.key])}
+                            onChange={(e) => setTargetFields((v) => ({ ...v, [f.key]: e.target.checked }))}
+                            style={{ width: 'auto' }}
+                          />
+                          {f.label}
+                        </label>
+                      ) : (
+                        <>
+                          <label htmlFor={`tt-${f.key}`}>
+                            {f.label}
+                            {!f.required && <span className="muted" style={{ fontWeight: 400 }}> (optional)</span>}
+                          </label>
+                          {f.hint && <p className="hint">{f.hint}</p>}
+                          <input
+                            id={`tt-${f.key}`}
+                            type={f.secret ? 'password' : 'text'}
+                            autoComplete="off"
+                            list={f.options ? `tt-${f.key}-options` : undefined}
+                            className={targetErrors[f.key] ? 'invalid' : ''}
+                            value={targetFields[f.key] ?? ''}
+                            onChange={(e) => setTargetFields((v) => ({ ...v, [f.key]: e.target.value }))}
+                          />
+                          {/* A datalist rather than a select: these are the common
+                              values, but the API takes any string and a closed list
+                              would block a valid one. */}
+                          {f.options && (
+                            <datalist id={`tt-${f.key}-options`}>
+                              {f.options.map((o) => <option key={o} value={o} />)}
+                            </datalist>
+                          )}
+                          {targetErrors[f.key] && <p className="error-text">{targetErrors[f.key]}</p>}
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
