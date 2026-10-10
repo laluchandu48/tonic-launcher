@@ -23,7 +23,19 @@ const COLUMNS = [
   { key: 'clicks',      label: 'Clicks',  int: true },
 ];
 
+/**
+ * The dashboard went live on this date, so there is no history before it. Every
+ * range is clamped here, which keeps a "last 30 days" view from opening with
+ * three weeks of zeros. Set VITE_DATA_START_DATE at build time to move it; the
+ * server applies the same floor from DATA_START_DATE.
+ */
+const DATA_START = import.meta.env?.VITE_DATA_START_DATE || '2026-10-08';
+
+const startLabel = new Date(`${DATA_START}T12:00:00Z`)
+  .toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
 const RANGES = {
+  all: { label: `Since ${startLabel}`, days: null },
   last7: { label: 'Last 7 days', days: 7 },
   last14: { label: 'Last 14 days', days: 14 },
   last30: { label: 'Last 30 days', days: 30 },
@@ -66,14 +78,16 @@ export default function AdsetHistory() {
   const [params] = useSearchParams();
   const toast = useToast();
 
-  const [rangeKey, setRangeKey] = useState(params.get('range') || 'last30');
+  const [rangeKey, setRangeKey] = useState(params.get('range') || 'all');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const range = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const days = RANGES[rangeKey]?.days ?? 30;
-    return { from: shift(today, -(days - 1)), to: today };
+    const days = RANGES[rangeKey]?.days ?? null;
+    const from = days ? shift(today, -(days - 1)) : DATA_START;
+    // Never ask for days that predate the dashboard.
+    return { from: from < DATA_START ? DATA_START : from, to: today };
   }, [rangeKey]);
 
   const load = useCallback(async () => {

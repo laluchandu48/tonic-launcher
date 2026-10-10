@@ -39,6 +39,22 @@ const DAY = 86_400_000;
 const iso = (d) => d.toISOString().slice(0, 10);
 const parseDay = (s) => new Date(`${s}T00:00:00Z`);
 
+/**
+ * The dashboard only started collecting on this date, so a range reaching
+ * further back can add nothing but rows of zeros — and, on the Tonic side, one
+ * wasted session-report call per empty day. Set DATA_START_DATE to move it.
+ */
+const DATA_START_DATE = String(process.env.DATA_START_DATE || '2026-10-08').slice(0, 10);
+
+const maxDate = (a, b) => (a > b ? a : b);
+/** The earliest date either API can usefully be asked about. */
+const rangeFloor = (today) =>
+  maxDate(DATA_START_DATE, iso(new Date(today.getTime() - (MAX_LOOKBACK_DAYS - 1) * DAY)));
+/** Say which of the two limits moved the start, because they move it for different reasons. */
+const floorNote = (floor) => (floor === DATA_START_DATE
+  ? `This dashboard started collecting on ${DATA_START_DATE}, so the range starts there.`
+  : `Tonic's session report only goes back ${MAX_LOOKBACK_DAYS} days, so the range starts at ${floor}.`);
+
 function eachDay(from, to) {
   const out = [];
   for (let t = parseDay(from).getTime(); t <= parseDay(to).getTime(); t += DAY) {
@@ -145,8 +161,8 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
   if (accountId !== stored.adAccountId) rememberAdAccount(accountId);
 
   const today = new Date();
-  const floor = iso(new Date(today.getTime() - (MAX_LOOKBACK_DAYS - 1) * DAY));
-  let from = String(req.query.from || iso(new Date(today.getTime() - 29 * DAY)));
+  const floor = rangeFloor(today);
+  let from = String(req.query.from || maxDate(iso(new Date(today.getTime() - 29 * DAY)), floor));
   let to = String(req.query.to || iso(today));
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
@@ -156,7 +172,7 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
 
   const notes = [];
   if (from < floor) {
-    notes.push(`Tonic's session report only goes back ${MAX_LOOKBACK_DAYS} days, so the range starts at ${floor}.`);
+    notes.push(floorNote(floor));
     from = floor;
   }
 
@@ -321,7 +337,7 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
       unmatchedRevenue: round(sum(unmatched, 'revenue')),
     },
     meta: {
-      from, to, param, lastFinalDate, accountId,
+      from, to, dataStart: DATA_START_DATE, param, lastFinalDate, accountId,
       currency: account.currency || 'USD',
       daysFetched: tonicFill.fetched,
       daysFromCache: tonicFill.cached,
@@ -373,8 +389,8 @@ router.get('/adsets/:id/history', requireCredentials, requireFbCredentials, asyn
   const adsetId = String(req.params.id);
 
   const today = new Date();
-  const floor = iso(new Date(today.getTime() - (MAX_LOOKBACK_DAYS - 1) * DAY));
-  let from = String(req.query.from || iso(new Date(today.getTime() - 29 * DAY)));
+  const floor = rangeFloor(today);
+  let from = String(req.query.from || maxDate(iso(new Date(today.getTime() - 29 * DAY)), floor));
   let to = String(req.query.to || iso(today));
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
@@ -384,7 +400,7 @@ router.get('/adsets/:id/history', requireCredentials, requireFbCredentials, asyn
 
   const notes = [];
   if (from < floor) {
-    notes.push(`Tonic's session report only goes back ${MAX_LOOKBACK_DAYS} days, so the range starts at ${floor}.`);
+    notes.push(floorNote(floor));
     from = floor;
   }
 
@@ -470,7 +486,8 @@ router.get('/adsets/:id/history', requireCredentials, requireFbCredentials, asyn
       impressions: sum('impressions'),
       clicks: sum('clicks'),
     },
-    meta: { from, to, param, accountId, currency: account.currency || 'USD', lastFinalDate,
+    meta: { from, to, dataStart: DATA_START_DATE, param, accountId,
+            currency: account.currency || 'USD', lastFinalDate,
             daysFetched: tonicFill.fetched, daysFromCache: tonicFill.cached },
     notes,
   });
