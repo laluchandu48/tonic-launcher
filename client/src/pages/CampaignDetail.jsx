@@ -131,6 +131,12 @@ export default function CampaignDetail() {
 
   // Tracking target. `target` is the network name ('' = none); `targetFields`
   // holds whatever that network needs.
+  // Renaming happens in place on the heading rather than in a drawer — it is
+  // one field, and a dialog for one field is a dialog too many.
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
+
   const [target, setTarget] = useState('');
   const [targetFields, setTargetFields] = useState({});
   const [revenueType, setRevenueType] = useState('estimatedRevenue');
@@ -196,6 +202,35 @@ export default function CampaignDetail() {
       toast.error(err.message);
     } finally {
       setSavingKeywords(false);
+    }
+  };
+
+  const startRename = () => {
+    setNameDraft(campaign?.name || '');
+    setRenaming(true);
+  };
+
+  const saveName = async () => {
+    const name = nameDraft.trim();
+    if (!name) {
+      toast.error('A campaign needs a name.');
+      return;
+    }
+    if (name === campaign?.name) {
+      setRenaming(false);
+      return;
+    }
+
+    setSavingName(true);
+    try {
+      const row = await api.campaigns.update(id, { name });
+      setCampaign((c) => ({ ...c, name: row?.name || name }));
+      setRenaming(false);
+      toast.success('Campaign renamed.');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingName(false);
     }
   };
 
@@ -306,7 +341,47 @@ export default function CampaignDetail() {
                 {campaign.state}
               </span>
             )}
-            <h2 style={{ margin: 0, fontSize: 21, fontWeight: 500 }}>{campaign?.name || `Campaign ${id}`}</h2>
+            {renaming ? (
+              <div className="toolbar" style={{ flex: 1, minWidth: 0 }}>
+                <input
+                  type="text"
+                  value={nameDraft}
+                  autoFocus
+                  disabled={savingName}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveName();
+                    if (e.key === 'Escape') setRenaming(false);
+                  }}
+                  style={{ fontSize: 17, maxWidth: 560 }}
+                  aria-label="Campaign name"
+                />
+                <button className="btn" onClick={saveName} disabled={savingName}>
+                  {savingName && <span className="spinner" />}
+                  {savingName ? 'Saving…' : 'Save'}
+                </button>
+                <button className="btn btn-ghost" onClick={() => setRenaming(false)} disabled={savingName}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <>
+                <h2 style={{ margin: 0, fontSize: 21, fontWeight: 500 }}>
+                  {campaign?.name || `Campaign ${id}`}
+                </h2>
+                <button
+                  className="icon-btn icon-btn-plain"
+                  onClick={startRename}
+                  title="Rename campaign"
+                  aria-label="Rename campaign"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
+                  </svg>
+                </button>
+              </>
+            )}
           </div>
 
           <div className="summary" style={{ margin: 0 }}>

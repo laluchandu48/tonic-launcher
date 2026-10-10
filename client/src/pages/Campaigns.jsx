@@ -66,6 +66,9 @@ export default function Campaigns() {
   const [today, setToday] = useState('');
   const [group, setGroup] = useState('campaign');
   const [search, setSearch] = useState('');
+  // Selected campaign ids, as a Set — membership is checked once per row.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const [campaigns, setCampaigns] = useState([]);
   const [stats, setStats] = useState(null);
@@ -168,6 +171,43 @@ export default function Campaigns() {
       .map((c) => ({ ...c, metrics: c.stats || zero }))
       .sort((a, b) => b.metrics.revenue - a.metrics.revenue || String(b.id).localeCompare(String(a.id)));
   }, [campaigns]);
+
+  /**
+   * Selection clears whenever the visible set changes — keeping ids selected
+   * that are no longer on screen makes a bulk action do something the person
+   * cannot see.
+   */
+  useEffect(() => { setSelected(new Set()); }, [selectedStates, rangeKey, group, search]);
+
+  const toggleRow = (id) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const allSelected = campaignRows.length > 0 && campaignRows.every((c) => selected.has(c.id));
+  const someSelected = selected.size > 0 && !allSelected;
+
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(campaignRows.map((c) => c.id)));
+
+  const bulkStatus = async (status) => {
+    const ids = campaignRows.filter((c) => selected.has(c.id)).map((c) => c.id);
+    if (!ids.length) return;
+
+    setBulkBusy(true);
+    try {
+      const res = await api.campaigns.bulkStatus(ids, status);
+      const verb = status === 'stopped' ? 'stopped' : 'activated';
+      toast.success(`${res.updated || ids.length} campaign${ids.length === 1 ? '' : 's'} ${verb}.`);
+      setSelected(new Set());
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const openDrawer = async () => {
     setSelectedHeadline(null);
@@ -353,9 +393,36 @@ export default function Campaigns() {
                 : 'No campaigns in the selected states.'}</p>
             </div>
           ) : (
+            <>
+            {selected.size > 0 && (
+              <div className="bulk-bar">
+                <strong>{selected.size} selected</strong>
+                <div className="toolbar">
+                  <button className="btn btn-secondary" onClick={() => bulkStatus('active')} disabled={bulkBusy}>
+                    {bulkBusy && <span className="spinner" />}Activate
+                  </button>
+                  <button className="btn btn-danger" onClick={() => bulkStatus('stopped')} disabled={bulkBusy}>
+                    {bulkBusy && <span className="spinner" />}Stop
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setSelected(new Set())}>Clear</button>
+                </div>
+              </div>
+            )}
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 36 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      /* Indeterminate is a DOM property, not an attribute, so
+                         it has to be set on the node itself. */
+                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                      onChange={toggleAll}
+                      style={{ width: 'auto' }}
+                      aria-label={allSelected ? 'Clear selection' : 'Select all campaigns'}
+                    />
+                  </th>
                   <th>Status</th>
                   <th>Id</th>
                   <th>Name</th>
@@ -369,7 +436,16 @@ export default function Campaigns() {
               </thead>
               <tbody>
                 {campaignRows.map((c) => (
-                  <tr key={`${c.state}-${c.id}`}>
+                  <tr key={`${c.state}-${c.id}`} className={selected.has(c.id) ? 'row-selected' : undefined}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(c.id)}
+                        onChange={() => toggleRow(c.id)}
+                        style={{ width: 'auto' }}
+                        aria-label={`Select ${c.name || c.id}`}
+                      />
+                    </td>
                     <td><span className={`badge ${stateTone(c.state)}`}>{c.state}</span></td>
                     <td className="mono">{c.id}</td>
                     <td><Link className="link" to={`/campaigns/${c.id}`}>{c.name}</Link></td>
@@ -397,9 +473,10 @@ export default function Campaigns() {
                     {metricCells(c.metrics)}
                   </tr>
                 ))}
-                {summaryRows(8)}
+                {summaryRows(9)}
               </tbody>
             </table>
+            </>
           )
         ) : (
           <table>

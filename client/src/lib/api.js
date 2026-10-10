@@ -145,6 +145,8 @@ export const api = {
     status: (id) => request(`/campaigns/${id}/status`),
     create: (payload) => request('/campaigns', { method: 'POST', body: payload }),
     update: (id, patch) => request(`/campaigns/${id}`, { method: 'PATCH', body: patch }),
+    bulkStatus: (ids, status) =>
+      request('/campaigns/bulk-status', { method: 'PATCH', body: { ids, status } }),
     trackingTarget: (id, trackingTarget) =>
       request(`/campaigns/${id}/tracking-target`, { method: 'PUT', body: { trackingTarget } }),
 

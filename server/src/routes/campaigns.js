@@ -154,6 +154,35 @@ async function patchOne(id, dataset) {
   return rows[0] ? present(rows[0]) : null;
 }
 
+/**
+ * Change the status of several campaigns at once.
+ *
+ * v4's PATCH takes an array of datasets, so this is one request however many
+ * are selected — not a loop of calls that could half-succeed and leave the
+ * table disagreeing with Tonic.
+ *
+ * Registered before '/:id' because Express matches in order and 'bulk-status'
+ * would otherwise be read as an id.
+ */
+router.patch('/bulk-status', asyncRoute(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const status = req.body?.status;
+
+  if (!ids.length) return res.status(400).json({ error: 'Select at least one campaign.' });
+  if (!['active', 'stopped'].includes(status)) {
+    return res.status(400).json({ error: 'Status must be active or stopped.' });
+  }
+  // Tonic caps how much one request may carry; chunking here keeps a large
+  // selection from failing wholesale.
+  if (ids.length > 100) return res.status(400).json({ error: 'Up to 100 campaigns at a time.' });
+
+  const { data } = await getV4Client().patchCampaigns(
+    ids.map((id) => ({ id: Number(id), status }))
+  );
+  const rows = (Array.isArray(data) ? data : []).map(present);
+  res.json({ ok: true, status, updated: rows.length, rows });
+}));
+
 router.patch('/:id', asyncRoute(async (req, res) => {
   const { name, status } = req.body || {};
   const dataset = {};

@@ -650,3 +650,33 @@ th.num .th-sort { justify-content: flex-end; }
   .table-scroll tbody tr:hover td:nth-child(2) { background: var(--surface-2); }
   .table-scroll tr.summary-row td:nth-child(2) { background: var(--row-total); }
 }
+
+/* ─── Bulk selection ──────────────────────────────────────────────────────── */
+
+/* Appears above the table only when something is selected, so the table does
+   not carry a permanently empty toolbar. */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--chip-on);
+  border-bottom: 1px solid var(--chip-on-line);
+  color: var(--chip-on-ink);
+}
+
+tr.row-selected td { background: var(--chip-on); }
+tbody tr.row-selected:hover td { background: var(--chip-on); }
+
+/* The pencil beside the campaign name: same size as the top-bar icon buttons
+   but on a light surface, so it borrows the shape and not the chrome colours. */
+.icon-btn-plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  width: 28px;
+  height: 28px;
+}
+.icon-btn-plain:hover { background: var(--surface-2); color: var(--ink); }
