@@ -8,6 +8,7 @@ import Campaigns from './pages/Campaigns.jsx';
 import CampaignDetail from './pages/CampaignDetail.jsx';
 import Compliance from './pages/Compliance.jsx';
 import FinalData from './pages/FinalData.jsx';
+import AdsetHistory from './pages/AdsetHistory.jsx';
 import FbSettings from './pages/FbSettings.jsx';
 import Settings from './pages/Settings.jsx';
 import Login from './pages/Login.jsx';
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/compliance" element={<Compliance />} />
         <Route path="/final-data" element={<FinalData />} />
+        <Route path="/final-data/adsets/:id" element={<AdsetHistory />} />
         <Route path="/fb-settings" element={<FbSettings />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />

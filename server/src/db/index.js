@@ -346,6 +346,16 @@ export const sessionDays = {
     `).all(param, from, to);
   },
 
+  /** One key's day-by-day rows, for the per-adset history view. */
+  byKey(from, to, param, key) {
+    return db.prepare(`
+      SELECT date, sessions, clicks, revenue
+        FROM tonic_session_days
+       WHERE param = ? AND key = ? AND date BETWEEN ? AND ?
+       ORDER BY date
+    `).all(param, String(key), from, to);
+  },
+
   /** Dropped when the join parameter changes — the old grouping is meaningless. */
   clearParam(param) {
     db.prepare('DELETE FROM tonic_session_days WHERE param = ?').run(param);

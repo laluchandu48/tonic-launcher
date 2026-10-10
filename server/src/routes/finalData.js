@@ -359,6 +359,123 @@ router.put('/budget/:id', requireFbCredentials, asyncRoute(async (req, res) => {
   });
 }));
 
+/**
+ * One adset, day by day.
+ *
+ * Same columns as the main table, one row per day, with a total at the end.
+ * Both sides are already available per day — Facebook with time_increment=1,
+ * Tonic because the cache is keyed by date — so this is a merge, not a new
+ * kind of query.
+ */
+router.get('/adsets/:id/history', requireCredentials, requireFbCredentials, asyncRoute(async (req, res) => {
+  const stored = readFbSettings();
+  const param = String(req.query.param || stored.joinParam).trim();
+  const adsetId = String(req.params.id);
+
+  const today = new Date();
+  const floor = iso(new Date(today.getTime() - (MAX_LOOKBACK_DAYS - 1) * DAY));
+  let from = String(req.query.from || iso(new Date(today.getTime() - 29 * DAY)));
+  let to = String(req.query.to || iso(today));
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ error: 'Dates must be YYYY-MM-DD.' });
+  }
+  if (from > to) [from, to] = [to, from];
+
+  const notes = [];
+  if (from < floor) {
+    notes.push(`Tonic's session report only goes back ${MAX_LOOKBACK_DAYS} days, so the range starts at ${floor}.`);
+    from = floor;
+  }
+
+  const accountId = normaliseAdAccountId(req.query.account) || stored.adAccountId;
+
+  let lastFinalDate = null;
+  try {
+    const { data } = await getV4Client().getStatisticsStatus();
+    lastFinalDate = data?.lastFinalDate || null;
+  } catch { /* only decides what gets cached */ }
+
+  const [fbSide, tonicFill] = await Promise.all([
+    (async () => {
+      const days = await getFbClient().getAdsetDailyInsights({ adsetId, since: from, until: to });
+      const meta = await getFbClient().getAdsetMeta(accountId).catch(() => new Map());
+      const account = await getFbClient().getAccountInfo(accountId)
+        .catch(() => ({ currency: 'USD', minorUnits: 100 }));
+      return { days, meta, account };
+    })(),
+    ensureTonicRange(from, to, param, lastFinalDate),
+  ]);
+
+  const { days, meta, account } = fbSide;
+  const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
+  const delivery = meta.get(adsetId) || {};
+
+  // Tonic rows for this adset's key, by date.
+  const tonicByDate = new Map(
+    sessionDays.byKey(from, to, param, adsetId).map((r) => [r.date, r])
+  );
+  const fbByDate = new Map(days.map((d) => [d.date, d]));
+
+  // Every day in the range, so a zero-spend day is visible as a gap rather
+  // than silently missing from the sequence.
+  const rows = eachDay(from, to).map((date) => {
+    const fb = fbByDate.get(date) || { spend: 0, impressions: 0, clicks: 0, leads: 0 };
+    const t = tonicByDate.get(date);
+    const conversions = t ? t.clicks : 0;
+    const revenue = t ? Number(t.revenue) || 0 : 0;
+    const profit = revenue - fb.spend;
+
+    return {
+      date,
+      spend: round(fb.spend),
+      revenue: round(revenue),
+      profit: round(profit),
+      roi: fb.spend > 0 ? round((profit / fb.spend) * 100, 1) : null,
+      cpl: conversions > 0 ? round(fb.spend / conversions, 3) : null,
+      rpc: conversions > 0 ? round(revenue / conversions, 3) : null,
+      leads: fb.leads,
+      conversions,
+      sessions: t ? t.sessions : 0,
+      impressions: fb.impressions,
+      clicks: fb.clicks,
+      final: Boolean(lastFinalDate) && date <= lastFinalDate,
+    };
+  });
+
+  const sum = (f) => rows.reduce((n, r) => n + (Number(r[f]) || 0), 0);
+  const spend = sum('spend');
+  const revenue = sum('revenue');
+  const conversions = sum('conversions');
+
+  res.json({
+    adset: {
+      id: adsetId,
+      name: delivery.name || null,
+      status: delivery.effectiveStatus || delivery.status || null,
+      budget: delivery.dailyBudgetMinor != null ? round(delivery.dailyBudgetMinor / minorUnits) : null,
+    },
+    rows,
+    totals: {
+      spend: round(spend),
+      revenue: round(revenue),
+      profit: round(revenue - spend),
+      roi: spend > 0 ? round(((revenue - spend) / spend) * 100, 1) : null,
+      // From the totals, not an average of the daily rates.
+      cpl: conversions > 0 ? round(spend / conversions, 3) : null,
+      rpc: conversions > 0 ? round(revenue / conversions, 3) : null,
+      leads: sum('leads'),
+      conversions,
+      sessions: sum('sessions'),
+      impressions: sum('impressions'),
+      clicks: sum('clicks'),
+    },
+    meta: { from, to, param, accountId, currency: account.currency || 'USD', lastFinalDate,
+            daysFetched: tonicFill.fetched, daysFromCache: tonicFill.cached },
+    notes,
+  });
+}));
+
 /** Turn an adset on or off from its row. */
 router.put('/adsets/:id/status', requireFbCredentials, asyncRoute(async (req, res) => {
   const active = req.body?.active;

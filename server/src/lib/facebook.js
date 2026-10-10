@@ -312,6 +312,7 @@ export class FacebookClient {
     while (body && pages < MAX_PAGES) {
       for (const a of body.data || []) {
         byId.set(String(a.id), {
+          name: a.name || null,
           status: a.status || null,
           effectiveStatus: a.effective_status || null,
           // Both are null when the campaign holds the budget (Advantage
@@ -403,6 +404,46 @@ export class FacebookClient {
       throw err;
     }
     return { id, dailyBudgetMinor: amount };
+  }
+
+  /**
+   * Day-by-day insights for a single adset.
+   *
+   * Asked of the adset node rather than the account with a filter, which keeps
+   * the request small and avoids Meta's filtering syntax. `time_increment=1`
+   * is what turns one total into one row per day.
+   */
+  async getAdsetDailyInsights({ adsetId, since, until }) {
+    const id = String(adsetId || '').trim();
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) {
+      throw new FacebookError('Not a valid adset ID.', { status: 400 });
+    }
+
+    const rows = [];
+    let body = await this.request(`/${id}/insights`, {
+      fields: 'date_start,spend,impressions,clicks,actions',
+      time_range: { since, until },
+      time_increment: 1,
+      limit: 200,
+    });
+
+    let pages = 0;
+    while (body && pages < MAX_PAGES) {
+      for (const r of body.data || []) {
+        rows.push({
+          date: r.date_start,
+          spend: Number(r.spend) || 0,
+          impressions: Number(r.impressions) || 0,
+          clicks: Number(r.clicks) || 0,
+          leads: leadsFrom(r.actions),
+        });
+      }
+      pages += 1;
+      const next = body.paging?.next;
+      if (!next) break;
+      body = await this.requestUrl(new URL(next), '/insights');
+    }
+    return rows;
   }
 
   /**

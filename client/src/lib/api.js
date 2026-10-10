@@ -121,6 +121,15 @@ export const api = {
         body: { dailyBudget, account },
       }),
 
+    adsetHistory: (adsetId, { from, to, account, param } = {}) => {
+      const q = new URLSearchParams();
+      if (from) q.set('from', from);
+      if (to) q.set('to', to);
+      if (account) q.set('account', account);
+      if (param) q.set('param', param);
+      return request(`/final-data/adsets/${encodeURIComponent(adsetId)}/history?${q}`);
+    },
+
     setAdsetStatus: (adsetId, active) =>
       request(`/final-data/adsets/${encodeURIComponent(adsetId)}/status`, {
         method: 'PUT',

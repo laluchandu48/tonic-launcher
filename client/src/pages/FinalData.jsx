@@ -433,7 +433,17 @@ export default function FinalData() {
               {rows.map((r) => (
                 <tr key={r.adsetId}>
                   <td>
-                    {r.adsetName || <span className="mono">{r.adsetId}</span>}
+                    {/* New tab, as asked — so the table you were reading stays
+                        where it was while you look at one adset's history. */}
+                    <a
+                      className="link"
+                      href={`/final-data/adsets/${r.adsetId}?account=${encodeURIComponent(accountId)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Open this adset's day-by-day history in a new tab"
+                    >
+                      {r.adsetName || r.adsetId}
+                    </a>
                     <div className="muted mono" style={{ fontSize: 11 }}>
                       {r.adsetId}
                       {/* The delivery state still matters when it is not simply
