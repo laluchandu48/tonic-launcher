@@ -599,7 +599,10 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
     from = floor;
   }
 
-  const key = `${from}|${to}|${param}`;
+  /* The scope is part of the key: without it, switching Business Manager
+     would hand back the previous selection's cached answer for ten minutes. */
+  const scope = String(req.query.business || req.query.account || 'all');
+  const key = `${from}|${to}|${param}|${scope}`;
   const cached = accountsSummary.get(key);
   if (cached && req.query.refresh !== '1' && Date.now() - cached.at < SUMMARY_TTL_MS) {
     return res.json({ ...cached.payload, cached: true, fetchedAt: new Date(cached.at).toISOString() });
@@ -617,7 +620,25 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
   const tonicFill = await ensureTonicRange(from, to, param, lastFinalDate);
   const byKey = new Map(sessionDays.range(from, to, param).map((r) => [String(r.key), r]));
 
-  const accounts = await getFbClient().getAdAccounts();
+  const all = await getFbClient().getAdAccounts();
+
+  /* Narrowing the scope is the difference between two Facebook calls and two
+     per account, which on the development tier is seconds against minutes. */
+  const accounts = req.query.account
+    ? all.filter((a) => a.id === normaliseAdAccountId(req.query.account))
+    : req.query.business
+      ? all.filter((a) => a.businessId === String(req.query.business))
+      : all;
+
+  if (!accounts.length) {
+    return res.status(404).json({
+      error: req.query.business
+        ? 'No ad accounts belong to that Business Manager, or the token cannot see them.'
+        : 'That ad account is not reachable with the current token.',
+      code: 'NO_FB_ACCOUNTS',
+    });
+  }
+
   const rows = [];
 
   for (const acct of accounts) {
@@ -633,6 +654,8 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
         name: acct.name,
         currency: info.currency || acct.currency || 'USD',
         active: acct.active,
+        businessId: acct.businessId,
+        businessName: acct.businessName,
         truncated: insights.truncated,
         ...foldAccount(insights.rows, byKey),
       });
@@ -640,7 +663,14 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
       /* One unreachable account must not cost the other nine. The row carries
          the reason instead of a row of zeros, which would read as "spent
          nothing" rather than "could not be asked". */
-      rows.push({ accountId: acct.id, name: acct.name, currency: acct.currency || null, error: err.message });
+      rows.push({
+        accountId: acct.id,
+        name: acct.name,
+        currency: acct.currency || null,
+        businessId: acct.businessId,
+        businessName: acct.businessName,
+        error: err.message,
+      });
     }
   }
 
@@ -673,6 +703,7 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
     totals: totalsFrom(comparable),
     meta: {
       from, to, param, lastFinalDate,
+      scope,
       dataStart: DATA_START_DATE,
       daysFetched: tonicFill.fetched,
       daysFromCache: tonicFill.cached,

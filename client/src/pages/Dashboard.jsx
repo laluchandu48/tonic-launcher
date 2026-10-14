@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -47,6 +47,28 @@ export default function Dashboard() {
   const [fbState, setFbState] = useState('loading'); // loading | ok | none | error
   const [fbRefreshing, setFbRefreshing] = useState(false);
   const [todayIso, setTodayIso] = useState('');
+
+  /* Which ad accounts this panel covers: everything the token reaches, one
+     Business Manager, or a single account. Remembered per browser, because
+     fetching the wrong scope is slow enough to be worth not repeating. */
+  const [fbAccounts, setFbAccounts] = useState([]);
+  const [scope, setScope] = useState(() => {
+    try { return localStorage.getItem('tonic.dashboard.scope') || 'all'; } catch { return 'all'; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('tonic.dashboard.scope', scope); } catch { /* private window */ }
+  }, [scope]);
+
+  const businesses = useMemo(() => {
+    const seen = new Map();
+    for (const a of fbAccounts) {
+      if (a.businessId && !seen.has(a.businessId)) {
+        seen.set(a.businessId, { id: a.businessId, name: a.businessName || a.businessId });
+      }
+    }
+    return [...seen.values()].sort((x, y) => x.name.localeCompare(y.name));
+  }, [fbAccounts]);
   const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
@@ -67,23 +89,7 @@ export default function Dashboard() {
         setDaily(day);
         setOffers(off);
         day.notes?.forEach((n) => toast.info(n));
-
-        /* Deliberately after the Tonic calls rather than inside the
-           Promise.all above: Facebook's development tier allows about one
-           call at a time, and a 403 there must not take the charts down with
-           it. No account is passed, so the server uses the one remembered on
-           the FB Settings screen. */
         setTodayIso(today);
-        try {
-          const fb = await api.finalData.accounts({ from: today, to: today });
-          setFbToday(fb.totals || null);
-          setFbRows(fb.rows || []);
-          setFbNotes(fb.notes || []);
-          setFbFetchedAt(fb.fetchedAt || null);
-          setFbState('ok');
-        } catch (err) {
-          setFbState(err.code === 'NO_FB_CREDENTIALS' ? 'none' : 'error');
-        }
       } catch (err) {
         if (err.code !== 'NO_CREDENTIALS') toast.error(err.message);
       } finally {
@@ -109,25 +115,63 @@ export default function Dashboard() {
     }
   };
 
-  /* The server caches this for ten minutes; this is how you get past that.
-     It is slow by nature — one Facebook call at a time, twice per account — so
-     the button says what it is doing rather than appearing to hang. */
-  const refreshAccounts = async () => {
+  /* The account list is one Facebook call and feeds the picker. */
+  useEffect(() => {
+    api.fbSettings.accounts()
+      .then(({ accounts }) => setFbAccounts(accounts || []))
+      .catch(() => { /* the panel below reports the real problem */ });
+  }, []);
+
+  const scopeParams = useCallback(() => (
+    scope.startsWith('biz:') ? { business: scope.slice(4) }
+      : scope.startsWith('acct:') ? { account: scope.slice(5) }
+      : {}
+  ), [scope]);
+
+  /**
+   * Facebook runs in its own effect, not inside the Tonic one.
+   *
+   * It is slow by nature — the development access tier allows about one call
+   * per 30 seconds and this needs two per account — and when it shared the
+   * Tonic effect its `finally` held `loadingStats` true, so the revenue and
+   * conversion cards sat on "—" waiting for Facebook. They are separate
+   * requests and must fail, and finish, separately.
+   */
+  const loadAccounts = useCallback(async (refresh = false) => {
     if (!todayIso) return;
-    setFbRefreshing(true);
+    if (refresh) setFbRefreshing(true);
     try {
-      const fb = await api.finalData.accounts({ from: todayIso, to: todayIso, refresh: true });
+      const fb = await api.finalData.accounts({
+        from: todayIso, to: todayIso, refresh, ...scopeParams(),
+      });
       setFbToday(fb.totals || null);
       setFbRows(fb.rows || []);
       setFbNotes(fb.notes || []);
       setFbFetchedAt(fb.fetchedAt || null);
       setFbState('ok');
     } catch (err) {
-      toast.error(err.message);
+      setFbState(err.code === 'NO_FB_CREDENTIALS' ? 'none' : 'error');
+      setFbNotes(err.message ? [err.message] : []);
+      setFbRows([]);
+      setFbToday(null);
+      if (refresh) toast.error(err.message);
     } finally {
       setFbRefreshing(false);
     }
-  };
+  }, [todayIso, scopeParams]);
+
+  useEffect(() => {
+    setFbState('loading');
+    loadAccounts(false);
+  }, [loadAccounts]);
+
+  const refreshAccounts = () => loadAccounts(true);
+
+  const scopeLabel = scope === 'all'
+    ? 'all ad accounts'
+    : scope.startsWith('biz:')
+      ? (businesses.find((b) => `biz:${b.id}` === scope)?.name || 'one Business Manager')
+      : (fbAccounts.find((a) => `acct:${a.id}` === scope)?.name || 'one ad account');
 
   const byStatus = (status) =>
     requests.filter((r) => String(r.status).toLowerCase() === status).length;
@@ -136,7 +180,36 @@ export default function Dashboard() {
   const series = [...(daily?.rows || [])].sort((a, b) => String(a.key).localeCompare(String(b.key)));
 
   return (
-    <Layout title="Dashboard">
+    <Layout
+      title="Dashboard"
+      tools={fbState === 'none' ? null : (
+        <select
+          className="topbar-select"
+          value={scope}
+          onChange={(e) => setScope(e.target.value)}
+          aria-label="Which ad accounts to show"
+          title="Narrowing to one Business Manager or account makes this much quicker to load"
+        >
+          <option value="all">All ad accounts</option>
+          {businesses.length > 0 && (
+            <optgroup label="Business Manager">
+              {businesses.map((b) => (
+                <option key={b.id} value={`biz:${b.id}`}>{b.name}</option>
+              ))}
+            </optgroup>
+          )}
+          {fbAccounts.length > 0 && (
+            <optgroup label="Ad account">
+              {fbAccounts.map((a) => (
+                <option key={a.id} value={`acct:${a.id}`}>
+                  {a.name}{a.currency ? ` (${a.currency})` : ''}{a.active ? '' : ' — inactive'}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+      )}
+    >
       {settings && !settings.configured && (
         <div className="banner banner-warn">
           <span>⚠</span>
@@ -219,7 +292,9 @@ export default function Dashboard() {
                 {fbState === 'loading' ? '—' : money(fbToday?.spend)}
               </div>
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                {fbState === 'ok' ? `${fbToday?.accounts ?? 0} ad account${fbToday?.accounts === 1 ? '' : 's'}` : 'all ad accounts'}
+                {fbState === 'ok'
+                  ? `${fbToday?.accounts ?? 0} ad account${fbToday?.accounts === 1 ? '' : 's'}`
+                  : scopeLabel}
               </div>
             </div>
             <div className="stat">
@@ -271,7 +346,17 @@ export default function Dashboard() {
               <div className="empty">Loading…</div>
             ) : fbRows.length === 0 ? (
               <div className="empty">
-                <p>No ad accounts are reachable with the current Facebook token.</p>
+                <p>
+                  {fbState === 'error'
+                    ? 'Facebook returned nothing for this selection.'
+                    : 'No ad accounts are reachable with the current Facebook token.'}
+                </p>
+                <p className="hint">
+                  Pick a Business Manager or a single ad account from the menu at the top right —
+                  it is far quicker than all accounts at once, which needs two Facebook calls per
+                  account. If every selection comes back empty, the token is the problem: check it
+                  on <Link className="link" to="/fb-settings">FB Settings</Link>.
+                </p>
               </div>
             ) : (
               <div className="table-scroll" style={{ '--table-min': '620px' }}>

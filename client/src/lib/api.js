@@ -115,11 +115,15 @@ export const api = {
 
     /* Every ad account for one range. Expensive on Facebook's side, so the
        server caches it and `refresh` is what forces a new fetch. */
-    accounts: ({ from, to, refresh } = {}) => {
+    accounts: ({ from, to, refresh, business, account } = {}) => {
       const q = new URLSearchParams();
       if (from) q.set('from', from);
       if (to) q.set('to', to);
       if (refresh) q.set('refresh', '1');
+      // Narrowing to one Business Manager, or one account, is what keeps this
+      // from costing two Facebook calls per account on the whole token.
+      if (business) q.set('business', business);
+      if (account) q.set('account', account);
       return request(`/final-data/accounts?${q}`);
     },
 

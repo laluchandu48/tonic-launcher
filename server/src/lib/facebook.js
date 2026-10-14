@@ -264,7 +264,7 @@ export class FacebookClient {
   async getAdAccounts() {
     const out = [];
     let body = await this.request('/me/adaccounts', {
-      fields: 'account_id,name,account_status,currency,timezone_name',
+      fields: 'account_id,name,account_status,currency,timezone_name,business{id,name}',
       limit: 200,
     });
 
@@ -280,6 +280,12 @@ export class FacebookClient {
           // 1 is active; anything else means the account cannot spend.
           active: a.account_status === 1,
           accountStatus: a.account_status ?? null,
+          /* Which Business Manager owns it. Free — it rides on the fields of
+             the call above rather than costing a request of its own, which
+             matters on an app limited to one call at a time. An account the
+             token reaches directly, outside any BM, has none. */
+          businessId: a.business?.id ? String(a.business.id) : null,
+          businessName: a.business?.name || null,
         });
       }
       pages += 1;
