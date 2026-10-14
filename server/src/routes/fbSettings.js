@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncRoute } from '../lib/http.js';
 import {
   readFbSettings, saveFbSettings, clearFbSettings, isFbConfigured, rememberAdAccount,
+  readDashboardAccounts, saveDashboardAccounts,
   maskedToken, getFbClient, requireFbCredentials,
   KNOWN_JOIN_PARAMS, DEFAULT_API_VERSION, DEFAULT_JOIN_PARAM,
 } from '../lib/fbCredentials.js';
@@ -11,13 +12,14 @@ const router = Router();
 
 /** Never returns the token itself — only whether one exists, and a mask. */
 router.get('/', (req, res) => {
-  const { adAccountId, apiVersion, joinParam, fromEnv } = readFbSettings();
+  const { adAccountId, apiVersion, joinParam, dashboardAccounts, fromEnv } = readFbSettings();
   res.json({
     configured: isFbConfigured(),
     maskedToken: maskedToken(),
     adAccountId,
     apiVersion,
     joinParam,
+    dashboardAccounts,
     fromEnv,
     knownJoinParams: KNOWN_JOIN_PARAMS,
     defaults: { apiVersion: DEFAULT_API_VERSION, joinParam: DEFAULT_JOIN_PARAM },
@@ -64,8 +66,34 @@ router.post('/test', asyncRoute(async (req, res) => {
 /** Every ad account the token can read — what the Final Data picker lists. */
 router.get('/accounts', requireFbCredentials, asyncRoute(async (req, res) => {
   const accounts = await getFbClient().getAdAccounts();
-  res.json({ accounts, selected: readFbSettings().adAccountId });
+  res.json({
+    accounts,
+    selected: readFbSettings().adAccountId,
+    dashboardAccounts: readDashboardAccounts(),
+  });
 }));
+
+/**
+ * The accounts the dashboard adds up.
+ *
+ * Saved as a set rather than toggled one at a time: picking five accounts
+ * should be one save, not five round trips, and a half-applied selection is
+ * worse than none.
+ */
+router.put('/dashboard-accounts', requireFbCredentials, (req, res) => {
+  const ids = req.body?.adAccountIds;
+  if (!Array.isArray(ids)) {
+    return res.status(400).json({ error: 'Send adAccountIds as an array.' });
+  }
+  if (ids.length > 25) {
+    // Each account costs two Facebook calls, serialised on the development
+    // tier. Twenty-five is already several minutes; beyond that the dashboard
+    // would simply never finish.
+    return res.status(400).json({ error: 'Choose at most 25 ad accounts.' });
+  }
+  const saved = saveDashboardAccounts(ids);
+  res.json({ ok: true, dashboardAccounts: saved });
+});
 
 /** Remember the picker's choice so the screen opens where it was left. */
 router.put('/account', requireFbCredentials, (req, res) => {

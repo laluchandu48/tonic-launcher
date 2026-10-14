@@ -16,6 +16,10 @@ const TOKEN_SETTING = 'fb.access_token';
 const ACCOUNT_SETTING = 'fb.ad_account_id';
 const VERSION_SETTING = 'fb.api_version';
 const JOIN_SETTING = 'fb.join_param';
+/* The accounts the dashboard adds up. Separate from ACCOUNT_SETTING, which is
+   only the Final Data picker's last position — one is a choice about what the
+   dashboard means, the other is where you happened to be looking. */
+const DASHBOARD_ACCOUNTS_SETTING = 'fb.dashboard_accounts';
 
 export const DEFAULT_JOIN_PARAM = 'subid2';
 export const DEFAULT_API_VERSION = 'v24.0';
@@ -37,8 +41,36 @@ export function readFbSettings() {
     adAccountId: normaliseAdAccountId(adAccountId),
     apiVersion: process.env.FB_API_VERSION || settings.get(VERSION_SETTING) || DEFAULT_API_VERSION,
     joinParam: process.env.FB_JOIN_PARAM || settings.get(JOIN_SETTING) || DEFAULT_JOIN_PARAM,
+    dashboardAccounts: readDashboardAccounts(),
     fromEnv: Boolean(process.env.FB_ACCESS_TOKEN),
   };
+}
+
+/**
+ * The ad accounts the dashboard totals, as stored.
+ *
+ * An empty list means "none chosen yet" rather than "none" — the dashboard
+ * treats it as nothing to show and says so, instead of silently reporting zero
+ * spend, which would read as a quiet day rather than an unanswered question.
+ */
+export function readDashboardAccounts() {
+  const raw = settings.get(DASHBOARD_ACCOUNTS_SETTING);
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    // Normalise on the way out as well as in: a value stored by an older
+    // version, or hand-edited, should not reach the Graph API unchecked.
+    return [...new Set(list.map(normaliseAdAccountId).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDashboardAccounts(ids) {
+  const clean = [...new Set((Array.isArray(ids) ? ids : []).map(normaliseAdAccountId).filter(Boolean))];
+  settings.set(DASHBOARD_ACCOUNTS_SETTING, JSON.stringify(clean));
+  return clean;
 }
 
 export function saveFbSettings({ accessToken, adAccountId, apiVersion, joinParam }) {
@@ -53,7 +85,7 @@ export function saveFbSettings({ accessToken, adAccountId, apiVersion, joinParam
 }
 
 export function clearFbSettings() {
-  for (const key of [TOKEN_SETTING, ACCOUNT_SETTING, VERSION_SETTING, JOIN_SETTING]) settings.delete(key);
+  for (const key of [TOKEN_SETTING, ACCOUNT_SETTING, VERSION_SETTING, JOIN_SETTING, DASHBOARD_ACCOUNTS_SETTING]) settings.delete(key);
   cachedClient = null;
   cachedFingerprint = null;
 }

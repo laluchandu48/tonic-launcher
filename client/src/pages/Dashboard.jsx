@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -48,27 +48,6 @@ export default function Dashboard() {
   const [fbRefreshing, setFbRefreshing] = useState(false);
   const [todayIso, setTodayIso] = useState('');
 
-  /* Which ad accounts this panel covers: everything the token reaches, one
-     Business Manager, or a single account. Remembered per browser, because
-     fetching the wrong scope is slow enough to be worth not repeating. */
-  const [fbAccounts, setFbAccounts] = useState([]);
-  const [scope, setScope] = useState(() => {
-    try { return localStorage.getItem('tonic.dashboard.scope') || 'all'; } catch { return 'all'; }
-  });
-
-  useEffect(() => {
-    try { localStorage.setItem('tonic.dashboard.scope', scope); } catch { /* private window */ }
-  }, [scope]);
-
-  const businesses = useMemo(() => {
-    const seen = new Map();
-    for (const a of fbAccounts) {
-      if (a.businessId && !seen.has(a.businessId)) {
-        seen.set(a.businessId, { id: a.businessId, name: a.businessName || a.businessId });
-      }
-    }
-    return [...seen.values()].sort((x, y) => x.name.localeCompare(y.name));
-  }, [fbAccounts]);
   const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
@@ -115,19 +94,6 @@ export default function Dashboard() {
     }
   };
 
-  /* The account list is one Facebook call and feeds the picker. */
-  useEffect(() => {
-    api.fbSettings.accounts()
-      .then(({ accounts }) => setFbAccounts(accounts || []))
-      .catch(() => { /* the panel below reports the real problem */ });
-  }, []);
-
-  const scopeParams = useCallback(() => (
-    scope.startsWith('biz:') ? { business: scope.slice(4) }
-      : scope.startsWith('acct:') ? { account: scope.slice(5) }
-      : {}
-  ), [scope]);
-
   /**
    * Facebook runs in its own effect, not inside the Tonic one.
    *
@@ -141,9 +107,9 @@ export default function Dashboard() {
     if (!todayIso) return;
     if (refresh) setFbRefreshing(true);
     try {
-      const fb = await api.finalData.accounts({
-        from: todayIso, to: todayIso, refresh, ...scopeParams(),
-      });
+      /* Which accounts this covers is the selection saved on FB Settings —
+         the server reads it, so nothing about it travels in the URL. */
+      const fb = await api.finalData.accounts({ from: todayIso, to: todayIso, refresh });
       setFbToday(fb.totals || null);
       setFbRows(fb.rows || []);
       setFbNotes(fb.notes || []);
@@ -158,7 +124,7 @@ export default function Dashboard() {
     } finally {
       setFbRefreshing(false);
     }
-  }, [todayIso, scopeParams]);
+  }, [todayIso]);
 
   useEffect(() => {
     setFbState('loading');
@@ -167,12 +133,6 @@ export default function Dashboard() {
 
   const refreshAccounts = () => loadAccounts(true);
 
-  const scopeLabel = scope === 'all'
-    ? 'all ad accounts'
-    : scope.startsWith('biz:')
-      ? (businesses.find((b) => `biz:${b.id}` === scope)?.name || 'one Business Manager')
-      : (fbAccounts.find((a) => `acct:${a.id}` === scope)?.name || 'one ad account');
-
   const byStatus = (status) =>
     requests.filter((r) => String(r.status).toLowerCase() === status).length;
 
@@ -180,36 +140,7 @@ export default function Dashboard() {
   const series = [...(daily?.rows || [])].sort((a, b) => String(a.key).localeCompare(String(b.key)));
 
   return (
-    <Layout
-      title="Dashboard"
-      tools={fbState === 'none' ? null : (
-        <select
-          className="topbar-select"
-          value={scope}
-          onChange={(e) => setScope(e.target.value)}
-          aria-label="Which ad accounts to show"
-          title="Narrowing to one Business Manager or account makes this much quicker to load"
-        >
-          <option value="all">All ad accounts</option>
-          {businesses.length > 0 && (
-            <optgroup label="Business Manager">
-              {businesses.map((b) => (
-                <option key={b.id} value={`biz:${b.id}`}>{b.name}</option>
-              ))}
-            </optgroup>
-          )}
-          {fbAccounts.length > 0 && (
-            <optgroup label="Ad account">
-              {fbAccounts.map((a) => (
-                <option key={a.id} value={`acct:${a.id}`}>
-                  {a.name}{a.currency ? ` (${a.currency})` : ''}{a.active ? '' : ' — inactive'}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
-      )}
-    >
+    <Layout title="Dashboard">
       {settings && !settings.configured && (
         <div className="banner banner-warn">
           <span>⚠</span>
@@ -294,7 +225,7 @@ export default function Dashboard() {
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 {fbState === 'ok'
                   ? `${fbToday?.accounts ?? 0} ad account${fbToday?.accounts === 1 ? '' : 's'}`
-                  : scopeLabel}
+                  : 'selected ad accounts'}
               </div>
             </div>
             <div className="stat">
@@ -352,10 +283,10 @@ export default function Dashboard() {
                     : 'No ad accounts are reachable with the current Facebook token.'}
                 </p>
                 <p className="hint">
-                  Pick a Business Manager or a single ad account from the menu at the top right —
-                  it is far quicker than all accounts at once, which needs two Facebook calls per
-                  account. If every selection comes back empty, the token is the problem: check it
-                  on <Link className="link" to="/fb-settings">FB Settings</Link>.
+                  Choose which ad accounts this covers on{' '}
+                  <Link className="link" to="/fb-settings">FB Settings</Link>. Picking the few you
+                  actually watch also makes this load in seconds — every account costs two Facebook
+                  calls, taken one at a time.
                 </p>
               </div>
             ) : (

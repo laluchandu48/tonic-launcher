@@ -22,18 +22,85 @@ export default function FbSettings() {
   const [testing, setTesting] = useState(false);
   const [identity, setIdentity] = useState(null);
 
+  /* The ad accounts the dashboard totals. Held as a Set while being edited and
+     saved in one go, so a slow save cannot leave half a selection stored. */
+  const [accounts, setAccounts] = useState([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState(null);
+  const [chosen, setChosen] = useState(() => new Set());
+  const [savedChosen, setSavedChosen] = useState(() => new Set());
+  const [savingAccounts, setSavingAccounts] = useState(false);
+  const [accountFilter, setAccountFilter] = useState('');
+
   const load = async () => {
     try {
       const s = await api.fbSettings.get();
       setState(s);
       setApiVersion(s.apiVersion || '');
       setJoinParam(s.joinParam || '');
+      const saved = new Set(s.dashboardAccounts || []);
+      setChosen(saved);
+      setSavedChosen(saved);
+      if (s.configured) loadAccounts();
     } catch (err) {
       toast.error(err.message);
     }
   };
 
   useEffect(() => { load(); }, []);
+
+  const loadAccounts = async () => {
+    setAccountsLoading(true);
+    setAccountsError(null);
+    try {
+      const { accounts: list, dashboardAccounts } = await api.fbSettings.accounts();
+      setAccounts(list || []);
+      if (Array.isArray(dashboardAccounts)) {
+        const saved = new Set(dashboardAccounts);
+        setChosen(saved);
+        setSavedChosen(saved);
+      }
+    } catch (err) {
+      /* Shown in place rather than as a toast: this is the one message that
+         explains an empty dashboard, and a toast disappears before it is read. */
+      setAccountsError(err.message);
+      setAccounts([]);
+    } finally {
+      setAccountsLoading(false);
+    }
+  };
+
+  const toggleAccount = (id) => setChosen((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const saveAccounts = async () => {
+    setSavingAccounts(true);
+    try {
+      const { dashboardAccounts } = await api.fbSettings.saveDashboardAccounts([...chosen]);
+      const saved = new Set(dashboardAccounts || []);
+      setChosen(saved);
+      setSavedChosen(saved);
+      toast.success(
+        saved.size
+          ? `Dashboard will total ${saved.size} ad account${saved.size === 1 ? '' : 's'}.`
+          : 'Cleared — the dashboard will fall back to every account the token can see.'
+      );
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingAccounts(false);
+    }
+  };
+
+  const visibleAccounts = accounts.filter((a) => {
+    const q = accountFilter.trim().toLowerCase();
+    return !q || `${a.name} ${a.id} ${a.businessName || ''}`.toLowerCase().includes(q);
+  });
+
+  const dirty = chosen.size !== savedChosen.size || [...chosen].some((id) => !savedChosen.has(id));
 
   const save = async () => {
     setSaving(true);
@@ -213,6 +280,94 @@ export default function FbSettings() {
           </p>
         </div>
       </div>
+
+      {/* ── Which ad accounts the dashboard totals ── */}
+      {state?.configured && (
+        <div className="card">
+          <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
+            <h2>Dashboard ad accounts</h2>
+            <div className="toolbar">
+              {accounts.length > 0 && (
+                <input
+                  type="text"
+                  value={accountFilter}
+                  placeholder="Filter accounts"
+                  onChange={(e) => setAccountFilter(e.target.value)}
+                  style={{ width: 200 }}
+                  aria-label="Filter ad accounts"
+                />
+              )}
+              <button className="btn btn-secondary" onClick={loadAccounts} disabled={accountsLoading}>
+                {accountsLoading && <span className="spinner" />}
+                {accountsLoading ? 'Loading…' : 'Reload'}
+              </button>
+            </div>
+          </div>
+
+          <p className="hint" style={{ padding: '0 18px' }}>
+            Tick the accounts the dashboard should add up. Every account costs two Facebook calls,
+            taken one at a time, so a short list is the difference between seconds and minutes.
+            With none ticked the dashboard falls back to every account this token can see.
+          </p>
+
+          {accountsError ? (
+            <div className="empty">
+              <p>{accountsError}</p>
+              <p className="hint">
+                If this says API access is blocked, the Meta app behind the token has no Marketing
+                API product — no selection here will fix that.
+              </p>
+            </div>
+          ) : accountsLoading ? (
+            <div className="empty">Loading ad accounts…</div>
+          ) : accounts.length === 0 ? (
+            <div className="empty">This token cannot see any ad accounts.</div>
+          ) : (
+            <>
+              <div className="account-picks">
+                {visibleAccounts.map((a) => (
+                  <label className="account-pick" key={a.id}>
+                    <input
+                      type="checkbox"
+                      checked={chosen.has(a.id)}
+                      onChange={() => toggleAccount(a.id)}
+                    />
+                    <span>
+                      {a.name}
+                      <span className="muted mono" style={{ display: 'block', fontSize: 11 }}>
+                        {a.id}
+                        {a.currency ? ` · ${a.currency}` : ''}
+                        {a.businessName ? ` · ${a.businessName}` : ''}
+                        {a.active ? '' : ' · inactive'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="toolbar" style={{ padding: '0 18px 18px' }}>
+                <button className="btn" onClick={saveAccounts} disabled={savingAccounts || !dirty}>
+                  {savingAccounts && <span className="spinner" />}
+                  {savingAccounts ? 'Saving…' : dirty ? 'Save selection' : 'Saved'}
+                </button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setChosen(new Set(visibleAccounts.map((a) => a.id)))}
+                  disabled={visibleAccounts.length === 0}
+                >
+                  Select all{accountFilter ? ' shown' : ''}
+                </button>
+                <button className="btn btn-ghost" onClick={() => setChosen(new Set())} disabled={chosen.size === 0}>
+                  Clear
+                </button>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {chosen.size} of {accounts.length} selected
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </Layout>
   );
 }

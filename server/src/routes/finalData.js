@@ -23,6 +23,7 @@ import { asyncRoute, requireCredentials } from '../lib/http.js';
 import { getV4Client } from '../lib/credentials.js';
 import {
   getFbClient, readFbSettings, requireFbCredentials, rememberAdAccount,
+  readDashboardAccounts,
 } from '../lib/fbCredentials.js';
 import { normaliseAdAccountId, minorUnitsPerUnit } from '../lib/facebook.js';
 import { sessionDays } from '../db/index.js';
@@ -599,9 +600,12 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
     from = floor;
   }
 
-  /* The scope is part of the key: without it, switching Business Manager
-     would hand back the previous selection's cached answer for ten minutes. */
-  const scope = String(req.query.business || req.query.account || 'all');
+  /* Which accounts the dashboard covers is a saved setting, not a query
+     parameter — chosen once on FB Settings rather than re-picked on every
+     visit. It is part of the cache key, so changing the selection shows the
+     new answer instead of the previous one for the next ten minutes. */
+  const chosen = readDashboardAccounts();
+  const scope = chosen.length ? chosen.join(',') : 'all';
   const key = `${from}|${to}|${param}|${scope}`;
   const cached = accountsSummary.get(key);
   if (cached && req.query.refresh !== '1' && Date.now() - cached.at < SUMMARY_TTL_MS) {
@@ -622,21 +626,23 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
 
   const all = await getFbClient().getAdAccounts();
 
-  /* Narrowing the scope is the difference between two Facebook calls and two
-     per account, which on the development tier is seconds against minutes. */
-  const accounts = req.query.account
-    ? all.filter((a) => a.id === normaliseAdAccountId(req.query.account))
-    : req.query.business
-      ? all.filter((a) => a.businessId === String(req.query.business))
-      : all;
+  /* Choosing a few accounts is the difference between two Facebook calls and
+     two per account, which on the development tier is seconds against
+     minutes. */
+  const accounts = chosen.length ? all.filter((a) => chosen.includes(a.id)) : all;
 
-  if (!accounts.length) {
+  if (chosen.length && !accounts.length) {
     return res.status(404).json({
-      error: req.query.business
-        ? 'No ad accounts belong to that Business Manager, or the token cannot see them.'
-        : 'That ad account is not reachable with the current token.',
+      error: 'The ad accounts chosen for the dashboard are not reachable with this token.',
+      hint: 'Choose them again on the FB Settings screen.',
       code: 'NO_FB_ACCOUNTS',
     });
+  }
+  if (!chosen.length && all.length > 3) {
+    notes.push(
+      `Showing all ${all.length} ad accounts, which needs two Facebook calls each. `
+      + 'Choose the ones you actually watch on the FB Settings screen and this loads in seconds.'
+    );
   }
 
   const rows = [];

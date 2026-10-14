@@ -158,6 +158,11 @@ export const api = {
     accounts: () => request('/fb-settings/accounts'),
     selectAccount: (adAccountId) =>
       request('/fb-settings/account', { method: 'PUT', body: { adAccountId } }),
+
+    /* The set of accounts the dashboard adds up — saved whole, not one at a
+       time, so a half-applied selection is never a state the server holds. */
+    saveDashboardAccounts: (adAccountIds) =>
+      request('/fb-settings/dashboard-accounts', { method: 'PUT', body: { adAccountIds } }),
     clear: () => request('/fb-settings', { method: 'DELETE' }),
   },
 
