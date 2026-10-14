@@ -503,4 +503,185 @@ router.put('/adsets/:id/status', requireFbCredentials, asyncRoute(async (req, re
   res.json({ ok: true, adsetId: result.id, status: result.status });
 }));
 
+/**
+ * Every ad account at once — spend against the Tonic revenue that matched it.
+ *
+ * Deliberately lighter than the per-adset report above: no adset or campaign
+ * meta, because budgets and delivery status are not part of this view. That
+ * halves the Facebook calls per account, which matters. An app on the
+ * development access tier allows roughly one call per 30 seconds, so the cost
+ * here is linear in the number of accounts and measured in minutes — hence the
+ * cache, and hence an explicit refresh rather than a fetch on every page load.
+ */
+/**
+ * Fold one account's adset insights against the Tonic rows for the range.
+ *
+ * Exported because this is the arithmetic worth testing: everything else in
+ * the handler is fetching and error handling.
+ */
+export function foldAccount(insightRows, byKey) {
+  let spend = 0; let impressions = 0; let clicks = 0; let leads = 0;
+  let revenue = 0; let conversions = 0; let matched = 0;
+
+  for (const ad of insightRows) {
+    spend += Number(ad.spend) || 0;
+    impressions += Number(ad.impressions) || 0;
+    clicks += Number(ad.clicks) || 0;
+    leads += Number(ad.leads) || 0;
+
+    const t = byKey.get(ad.adsetId);
+    if (t) {
+      matched += 1;
+      revenue += Number(t.revenue) || 0;
+      conversions += Number(t.clicks) || 0;
+    }
+  }
+
+  return {
+    adsets: insightRows.length,
+    matched,
+    spend: round(spend),
+    revenue: round(revenue),
+    profit: round(revenue - spend),
+    roi: spend > 0 ? round(((revenue - spend) / spend) * 100, 1) : null,
+    impressions,
+    clicks,
+    leads,
+    conversions,
+  };
+}
+
+/**
+ * Total the accounts whose spend can honestly be set against Tonic's USD
+ * revenue. ROI comes from the summed spend and revenue, not from averaging the
+ * per-account ROIs — an average would weight a $5 account the same as a $5,000
+ * one and quietly report a figure nobody earned.
+ */
+export function totalsFrom(rows) {
+  const sum = (f) => rows.reduce((n, r) => n + (Number(r[f]) || 0), 0);
+  const spend = sum('spend');
+  const revenue = sum('revenue');
+
+  return {
+    accounts: rows.length,
+    spend: round(spend),
+    revenue: round(revenue),
+    profit: round(revenue - spend),
+    roi: spend > 0 ? round(((revenue - spend) / spend) * 100, 1) : null,
+    leads: sum('leads'),
+    conversions: sum('conversions'),
+    impressions: sum('impressions'),
+    clicks: sum('clicks'),
+    currency: 'USD',
+  };
+}
+
+const SUMMARY_TTL_MS = 10 * 60_000;
+const accountsSummary = new Map(); // `${from}|${to}|${param}` -> { at, payload }
+
+router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(async (req, res) => {
+  const stored = readFbSettings();
+  const param = String(req.query.param || stored.joinParam).trim();
+
+  const today = new Date();
+  const floor = rangeFloor(today);
+  let from = String(req.query.from || iso(today));
+  let to = String(req.query.to || iso(today));
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ error: 'Dates must be YYYY-MM-DD.' });
+  }
+  if (from > to) [from, to] = [to, from];
+
+  const notes = [];
+  if (from < floor) {
+    notes.push(floorNote(floor));
+    from = floor;
+  }
+
+  const key = `${from}|${to}|${param}`;
+  const cached = accountsSummary.get(key);
+  if (cached && req.query.refresh !== '1' && Date.now() - cached.at < SUMMARY_TTL_MS) {
+    return res.json({ ...cached.payload, cached: true, fetchedAt: new Date(cached.at).toISOString() });
+  }
+
+  let lastFinalDate = null;
+  try {
+    const { data } = await getV4Client().getStatisticsStatus();
+    lastFinalDate = data?.lastFinalDate || null;
+  } catch { /* only decides what gets cached */ }
+
+  /* Tonic is fetched once for the whole range, not once per account: the join
+     key is the adset ID, which belongs to no particular account, so the same
+     day cache serves all of them. */
+  const tonicFill = await ensureTonicRange(from, to, param, lastFinalDate);
+  const byKey = new Map(sessionDays.range(from, to, param).map((r) => [String(r.key), r]));
+
+  const accounts = await getFbClient().getAdAccounts();
+  const rows = [];
+
+  for (const acct of accounts) {
+    /* Serial on purpose — see the note above. Promise.all here is what
+       produced the #613 concurrency errors. */
+    try {
+      const insights = await getFbClient().getAdsetInsights({ since: from, until: to, accountId: acct.id });
+      const info = await getFbClient().getAccountInfo(acct.id)
+        .catch(() => ({ currency: acct.currency || 'USD' }));
+
+      rows.push({
+        accountId: acct.id,
+        name: acct.name,
+        currency: info.currency || acct.currency || 'USD',
+        active: acct.active,
+        truncated: insights.truncated,
+        ...foldAccount(insights.rows, byKey),
+      });
+    } catch (err) {
+      /* One unreachable account must not cost the other nine. The row carries
+         the reason instead of a row of zeros, which would read as "spent
+         nothing" rather than "could not be asked". */
+      rows.push({ accountId: acct.id, name: acct.name, currency: acct.currency || null, error: err.message });
+    }
+  }
+
+  rows.sort((a, b) => (b.spend || 0) - (a.spend || 0) || String(a.name).localeCompare(String(b.name)));
+
+  /* Tonic reports revenue in USD. Subtracting spend booked in another currency
+     from it gives a number that is not profit in either currency, so those
+     accounts are listed but kept out of the total rather than quietly folded
+     in at an implied rate of 1:1. */
+  const comparable = rows.filter((r) => !r.error && r.currency === 'USD');
+  const foreign = rows.filter((r) => !r.error && r.currency !== 'USD');
+  const failed = rows.filter((r) => r.error);
+
+  if (foreign.length) {
+    notes.push(
+      `${foreign.map((r) => r.name || r.accountId).join(', ')} ${foreign.length === 1 ? 'books' : 'book'} `
+      + 'spend in a currency other than USD, while Tonic reports revenue in USD. '
+      + 'Those rows are shown but left out of the total.'
+    );
+  }
+  if (failed.length) {
+    notes.push(`${failed.length} ad account${failed.length === 1 ? '' : 's'} could not be fetched; the reason is on the row.`);
+  }
+  if (lastFinalDate && to > lastFinalDate) {
+    notes.push(`Tonic has finalised revenue through ${lastFinalDate}; anything after that is an estimate and can still change.`);
+  }
+
+  const payload = {
+    rows,
+    totals: totalsFrom(comparable),
+    meta: {
+      from, to, param, lastFinalDate,
+      dataStart: DATA_START_DATE,
+      daysFetched: tonicFill.fetched,
+      daysFromCache: tonicFill.cached,
+    },
+    notes,
+  };
+
+  accountsSummary.set(key, { at: Date.now(), payload });
+  res.json({ ...payload, cached: false, fetchedAt: new Date().toISOString() });
+}));
+
 export default router;

@@ -113,6 +113,16 @@ export const api = {
       return request(`/final-data?${q}`);
     },
 
+    /* Every ad account for one range. Expensive on Facebook's side, so the
+       server caches it and `refresh` is what forces a new fetch. */
+    accounts: ({ from, to, refresh } = {}) => {
+      const q = new URLSearchParams();
+      if (from) q.set('from', from);
+      if (to) q.set('to', to);
+      if (refresh) q.set('refresh', '1');
+      return request(`/final-data/accounts?${q}`);
+    },
+
     // `id` is whichever node holds the budget — the adset, or the campaign
     // when it uses Advantage campaign budget.
     setBudget: (id, dailyBudget, account) =>

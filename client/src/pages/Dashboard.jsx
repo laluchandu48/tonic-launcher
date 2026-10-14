@@ -41,7 +41,12 @@ export default function Dashboard() {
      it can be unavailable (no token, no ad account) while everything else on
      this screen is perfectly fine — one missing panel, not a broken page. */
   const [fbToday, setFbToday] = useState(null);
+  const [fbRows, setFbRows] = useState([]);
+  const [fbNotes, setFbNotes] = useState([]);
+  const [fbFetchedAt, setFbFetchedAt] = useState(null);
   const [fbState, setFbState] = useState('loading'); // loading | ok | none | error
+  const [fbRefreshing, setFbRefreshing] = useState(false);
+  const [todayIso, setTodayIso] = useState('');
   const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
@@ -68,9 +73,13 @@ export default function Dashboard() {
            call at a time, and a 403 there must not take the charts down with
            it. No account is passed, so the server uses the one remembered on
            the FB Settings screen. */
+        setTodayIso(today);
         try {
-          const fb = await api.finalData.get({ from: today, to: today });
+          const fb = await api.finalData.accounts({ from: today, to: today });
           setFbToday(fb.totals || null);
+          setFbRows(fb.rows || []);
+          setFbNotes(fb.notes || []);
+          setFbFetchedAt(fb.fetchedAt || null);
           setFbState('ok');
         } catch (err) {
           setFbState(err.code === 'NO_FB_CREDENTIALS' ? 'none' : 'error');
@@ -97,6 +106,26 @@ export default function Dashboard() {
       toast.error(err.message);
     } finally {
       setCalculating(false);
+    }
+  };
+
+  /* The server caches this for ten minutes; this is how you get past that.
+     It is slow by nature — one Facebook call at a time, twice per account — so
+     the button says what it is doing rather than appearing to hang. */
+  const refreshAccounts = async () => {
+    if (!todayIso) return;
+    setFbRefreshing(true);
+    try {
+      const fb = await api.finalData.accounts({ from: todayIso, to: todayIso, refresh: true });
+      setFbToday(fb.totals || null);
+      setFbRows(fb.rows || []);
+      setFbNotes(fb.notes || []);
+      setFbFetchedAt(fb.fetchedAt || null);
+      setFbState('ok');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setFbRefreshing(false);
     }
   };
 
@@ -180,42 +209,139 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Today's Facebook spend against today's Tonic revenue ── */}
+      {/* ── Today, every ad account: spend against the Tonic revenue it matched ── */}
       {fbState !== 'none' && (
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-label">Today's ad spend</div>
-            <div className="stat-value">
-              {fbState === 'loading' ? '—' : money(fbToday?.spend)}
+        <>
+          <div className="stats">
+            <div className="stat">
+              <div className="stat-label">Today's ad spend</div>
+              <div className="stat-value">
+                {fbState === 'loading' ? '—' : money(fbToday?.spend)}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                {fbState === 'ok' ? `${fbToday?.accounts ?? 0} ad account${fbToday?.accounts === 1 ? '' : 's'}` : 'all ad accounts'}
+              </div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Today's revenue</div>
+              <div className="stat-value">
+                {fbState === 'loading' ? '—' : money(fbToday?.revenue)}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>matched to adsets</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Today's profit</div>
+              <div className={`stat-value ${fbState === 'ok' ? tone(fbToday?.profit) : ''}`}>
+                {fbState === 'loading' ? '—' : money(fbToday?.profit)}
+              </div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">Today's ROI</div>
+              <div className={`stat-value ${fbState === 'ok' ? tone(fbToday?.roi) : ''}`}>
+                {fbState === 'loading' ? '—'
+                  : fbToday?.roi == null ? '—'
+                  : `${fbToday.roi} %`}
+              </div>
             </div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Today's revenue</div>
-            <div className="stat-value">
-              {fbState === 'loading' ? '—' : money(fbToday?.revenue)}
+
+          <div className="card" style={{ marginBottom: 18 }}>
+            <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
+              <h2>By ad account</h2>
+              <div className="toolbar">
+                {fbFetchedAt && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    as of {new Date(fbFetchedAt).toLocaleTimeString()}
+                  </span>
+                )}
+                <Link className="link" to="/final-data">Final Data</Link>
+                <button
+                  className="btn btn-secondary"
+                  onClick={refreshAccounts}
+                  disabled={fbRefreshing || fbState === 'loading'}
+                  title="Re-fetches every ad account from Facebook — one call at a time, so it takes a moment"
+                >
+                  {fbRefreshing && <span className="spinner" />}
+                  {fbRefreshing ? 'Fetching…' : 'Refresh'}
+                </button>
+              </div>
             </div>
-            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-              matched to adsets
-            </div>
+
+            {fbState === 'loading' ? (
+              <div className="empty">Loading…</div>
+            ) : fbRows.length === 0 ? (
+              <div className="empty">
+                <p>No ad accounts are reachable with the current Facebook token.</p>
+              </div>
+            ) : (
+              <div className="table-scroll" style={{ '--table-min': '620px' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ad account</th>
+                      <th className="num">Spend</th>
+                      <th className="num">Revenue</th>
+                      <th className="num">Profit</th>
+                      <th className="num">ROI</th>
+                      <th className="num" title="Adsets with Tonic revenue against them, of all adsets with spend">Matched</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fbRows.map((r) => (
+                      <tr key={r.accountId}>
+                        <td>
+                          {r.name}
+                          <div className="muted mono" style={{ fontSize: 11 }}>
+                            {r.accountId}
+                            {r.currency && r.currency !== 'USD' && (
+                              <span className="badge badge-pending" style={{ marginLeft: 6 }}>{r.currency}</span>
+                            )}
+                            {r.active === false && (
+                              <span className="badge badge-idle" style={{ marginLeft: 6 }}>inactive</span>
+                            )}
+                          </div>
+                        </td>
+                        {r.error ? (
+                          /* A row of zeros would read as "spent nothing" rather
+                             than "could not be asked", so it says which. */
+                          <td className="muted" colSpan={5}>{r.error}</td>
+                        ) : (
+                          <>
+                            <td className="num">{money(r.spend)}</td>
+                            <td className="num">{money(r.revenue)}</td>
+                            <td className={`num ${tone(r.profit)}`}>{money(r.profit)}</td>
+                            <td className={`num ${tone(r.roi)}`}>{r.roi == null ? '—' : `${r.roi} %`}</td>
+                            <td className="num muted">{r.matched} / {r.adsets}</td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                  {fbToday && (
+                    <tfoot>
+                      <tr className="summary-row">
+                        <td className="label">Total</td>
+                        <td className="num">{money(fbToday.spend)}</td>
+                        <td className="num">{money(fbToday.revenue)}</td>
+                        <td className={`num ${tone(fbToday.profit)}`}>{money(fbToday.profit)}</td>
+                        <td className={`num ${tone(fbToday.roi)}`}>
+                          {fbToday.roi == null ? '—' : `${fbToday.roi} %`}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            )}
+
+            {fbNotes.length > 0 && (
+              <div className="footnotes">
+                {fbNotes.map((note, i) => <p className="note" key={i}>{note}</p>)}
+              </div>
+            )}
           </div>
-          <div className="stat">
-            <div className="stat-label">Today's profit</div>
-            <div className={`stat-value ${fbState === 'ok' ? tone(fbToday?.profit) : ''}`}>
-              {fbState === 'loading' ? '—' : money(fbToday?.profit)}
-            </div>
-          </div>
-          <div className="stat">
-            <div className="stat-label">Today's ROI</div>
-            <div className={`stat-value ${fbState === 'ok' ? tone(fbToday?.roi) : ''}`}>
-              {fbState === 'loading' ? '—'
-                : fbToday?.roi == null ? '—'
-                : `${fbToday.roi} %`}
-            </div>
-            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-              <Link className="link" to="/final-data">Final Data</Link>
-            </div>
-          </div>
-        </div>
+        </>
       )}
 
       {fbState === 'error' && (
