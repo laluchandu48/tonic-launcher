@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout.jsx';
 import Drawer from '../components/Drawer.jsx';
 import { useToast } from '../components/Toast.jsx';
+import Picker from '../components/Picker.jsx';
 import { api } from '../lib/api.js';
 import { languageName, byLanguageName } from '../lib/languages.js';
 
@@ -368,32 +369,43 @@ export default function Articles() {
 
         <div className="field">
           <label htmlFor="country">GEO</label>
-          <select
+          {/* Searchable: the GEO list runs to a couple of hundred entries, and
+              scrolling a native select to find one is the slow part of filling
+              this form in. Typing matches the code or the country name. */}
+          <Picker
             id="country"
-            className={errors.country ? 'invalid' : ''}
             value={form.country}
-            onChange={(e) => set({ country: e.target.value })}
-          >
-            <option value="">Select a country</option>
-            <option value="WO">WO — Worldwide</option>
-            {countries.map((c) => <option key={c.code} value={c.code}>{c.code}{c.name ? ` — ${c.name}` : ''}</option>)}
-          </select>
+            onChange={(code) => set({ country: code })}
+            invalid={Boolean(errors.country)}
+            placeholder="Select a country"
+            searchPlaceholder="Type a country or code…"
+            emptyText="No country matches that."
+            options={[
+              { value: 'WO', label: 'WO', hint: 'Worldwide' },
+              ...countries.map((c) => ({ value: c.code, label: c.code, hint: c.name || '' })),
+            ]}
+          />
           {errors.country && <p className="error-text">{errors.country}</p>}
         </div>
 
         <div className="field">
           <label htmlFor="offer">Offer</label>
-          <select
+          {/* Typing matches the offer name or its vertical, so "insurance"
+              finds every insurance offer without knowing their names. */}
+          <Picker
             id="offer"
-            className={errors.offerId ? 'invalid' : ''}
             value={form.offerId}
-            onChange={(e) => set({ offerId: e.target.value })}
-          >
-            <option value="">Select an offer</option>
-            {offers.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}{o.vertical ? ` — ${o.vertical}` : ''}</option>
-            ))}
-          </select>
+            onChange={(id) => set({ offerId: id })}
+            invalid={Boolean(errors.offerId)}
+            placeholder="Select an offer"
+            searchPlaceholder="Type an offer or vertical…"
+            emptyText="No offer matches that."
+            options={offers.map((o) => ({
+              value: o.id,
+              label: o.name,
+              hint: o.vertical || '',
+            }))}
+          />
           {errors.offerId && <p className="error-text">{errors.offerId}</p>}
         </div>
 

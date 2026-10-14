@@ -16,6 +16,8 @@ const count = (n, compact) => {
   return v.toLocaleString();
 };
 const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
+/** Profit and ROI are the two numbers worth colouring. */
+const tone = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : '');
 
 function shift(iso, days) {
   const d = new Date(`${iso}T12:00:00Z`);
@@ -34,6 +36,12 @@ export default function Dashboard() {
   const [daily, setDaily] = useState(null);
   const [offers, setOffers] = useState(null);
   const [loadingStats, setLoadingStats] = useState(true);
+
+  /* Today's Facebook side. Kept in its own request and its own state because
+     it can be unavailable (no token, no ad account) while everything else on
+     this screen is perfectly fine — one missing panel, not a broken page. */
+  const [fbToday, setFbToday] = useState(null);
+  const [fbState, setFbState] = useState('loading'); // loading | ok | none | error
   const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
@@ -54,6 +62,19 @@ export default function Dashboard() {
         setDaily(day);
         setOffers(off);
         day.notes?.forEach((n) => toast.info(n));
+
+        /* Deliberately after the Tonic calls rather than inside the
+           Promise.all above: Facebook's development tier allows about one
+           call at a time, and a 403 there must not take the charts down with
+           it. No account is passed, so the server uses the one remembered on
+           the FB Settings screen. */
+        try {
+          const fb = await api.finalData.get({ from: today, to: today });
+          setFbToday(fb.totals || null);
+          setFbState('ok');
+        } catch (err) {
+          setFbState(err.code === 'NO_FB_CREDENTIALS' ? 'none' : 'error');
+        }
       } catch (err) {
         if (err.code !== 'NO_CREDENTIALS') toast.error(err.message);
       } finally {
@@ -158,6 +179,51 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* ── Today's Facebook spend against today's Tonic revenue ── */}
+      {fbState !== 'none' && (
+        <div className="stats">
+          <div className="stat">
+            <div className="stat-label">Today's ad spend</div>
+            <div className="stat-value">
+              {fbState === 'loading' ? '—' : money(fbToday?.spend)}
+            </div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Today's revenue</div>
+            <div className="stat-value">
+              {fbState === 'loading' ? '—' : money(fbToday?.revenue)}
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              matched to adsets
+            </div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Today's profit</div>
+            <div className={`stat-value ${fbState === 'ok' ? tone(fbToday?.profit) : ''}`}>
+              {fbState === 'loading' ? '—' : money(fbToday?.profit)}
+            </div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Today's ROI</div>
+            <div className={`stat-value ${fbState === 'ok' ? tone(fbToday?.roi) : ''}`}>
+              {fbState === 'loading' ? '—'
+                : fbToday?.roi == null ? '—'
+                : `${fbToday.roi} %`}
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              <Link className="link" to="/final-data">Final Data</Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fbState === 'error' && (
+        <p className="hint" style={{ marginTop: -10, marginBottom: 18 }}>
+          Today's Facebook numbers could not be fetched. The rest of this page is
+          unaffected — check the token on <Link className="link" to="/fb-settings">FB Settings</Link>.
+        </p>
+      )}
 
       {/* ── Charts ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.55fr) minmax(0, 1fr)', gap: 16, marginBottom: 18, alignItems: 'start' }}>

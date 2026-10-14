@@ -165,6 +165,7 @@ body {
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th {
+  position: relative;
   text-align: left;
   font-size: 11.5px;
   letter-spacing: 0.02em;
@@ -627,7 +628,7 @@ th.num .th-sort { justify-content: flex-end; }
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
-.table-scroll table { min-width: 1080px; }
+.table-scroll table { min-width: var(--table-min, 1080px); }
 
 .table-scroll::-webkit-scrollbar { height: 8px; }
 .table-scroll::-webkit-scrollbar-track { background: transparent; }
@@ -637,18 +638,169 @@ th.num .th-sort { justify-content: flex-end; }
 }
 .table-scroll::-webkit-scrollbar-thumb:hover { background: var(--ink-soft); }
 
-/* The first two columns stay put while the numbers scroll past, so a row is
-   always identifiable. */
+/* The switch and the adset name stay put while the numbers scroll past, so a
+   row is always identifiable. Marked by class, not by position: columns can be
+   hidden now, and nth-child(2) would be whichever one happened to be second.
+   The 52px offset is the width pinned on the switch column in FinalData.jsx —
+   the two have to agree or the second column overlaps the first. */
 @media (min-width: 640px) {
-  .table-scroll th:nth-child(2),
-  .table-scroll td:nth-child(2) {
+  .table-scroll th.col-pin-a,
+  .table-scroll td.col-pin-a,
+  .table-scroll th.col-pin-b,
+  .table-scroll td.col-pin-b {
     position: sticky;
-    left: 0;
     background: var(--surface);
-    z-index: 1;
   }
-  .table-scroll tbody tr:hover td:nth-child(2) { background: var(--surface-2); }
-  .table-scroll tr.summary-row td:nth-child(2) { background: var(--row-total); }
+  .table-scroll th.col-pin-a, .table-scroll td.col-pin-a { left: 0; z-index: 2; }
+  .table-scroll th.col-pin-b, .table-scroll td.col-pin-b { left: 52px; z-index: 1; }
+
+  .table-scroll tbody tr:hover td.col-pin-a,
+  .table-scroll tbody tr:hover td.col-pin-b { background: var(--surface-2); }
+  .table-scroll tr.summary-row td.col-pin-a,
+  .table-scroll tr.summary-row td.col-pin-b { background: var(--row-total); }
+}
+
+/* ─── Column resizing and the Columns menu ────────────────────────────────── */
+
+/* A wide invisible target over a thin visible line: the line shows where the
+   boundary is, the padding makes it catchable without precision aiming. */
+.col-grip {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 3;
+}
+.col-grip::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 4px;
+  width: 1px;
+  background: var(--line);
+}
+.col-grip:hover::after { background: var(--accent); top: 0; bottom: 0; width: 2px; }
+
+/* While dragging, nothing else on the page should select or show a text
+   cursor — otherwise the drag paints a selection across the table. */
+body.col-resizing { cursor: col-resize; user-select: none; }
+body.col-resizing * { cursor: col-resize !important; }
+
+.col-menu { position: relative; }
+.col-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.col-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.col-menu-item:hover { background: var(--surface-2); }
+.col-menu-item input { width: auto; margin: 0; }
+.col-menu-reset {
+  width: 100%;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  font-size: 12px;
+}
+
+/* ─── Disclosure header ───────────────────────────────────────────────────── */
+
+.card-head.disclosure { cursor: pointer; user-select: none; }
+.card-head.disclosure:hover h2 { color: var(--accent); }
+.card-head.disclosure h2 { display: flex; align-items: center; }
+.disclosure-caret {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  transition: transform 120ms ease;
+}
+.disclosure-caret.open { transform: rotate(90deg); }
+
+/* ─── Searchable picker ───────────────────────────────────────────────────── */
+
+.picker { position: relative; }
+.picker-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 11px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.picker-control:hover { border-color: var(--ink-soft); }
+.picker-control.invalid { border-color: var(--bad-ink); }
+.picker-control:disabled { opacity: 0.6; cursor: not-allowed; }
+.picker-caret { color: var(--ink-soft); font-size: 11px; }
+
+.picker-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.2);
+}
+.picker-search { margin-bottom: 6px; }
+.picker-list { max-height: 260px; overflow-y: auto; }
+.picker-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.picker-option.active { background: var(--surface-2); }
+.picker-option.chosen { color: var(--accent); font-weight: 500; }
+.picker-option .muted { font-size: 12px; }
+.picker-empty { margin: 0; padding: 14px 9px; font-size: 13px; color: var(--ink-soft); }
+.picker-count {
+  margin: 4px 0 0;
+  padding: 5px 9px 2px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-soft);
 }
 
 /* ─── Bulk selection ──────────────────────────────────────────────────────── */

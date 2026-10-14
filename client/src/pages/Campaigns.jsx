@@ -4,6 +4,9 @@ import Layout from '../components/Layout.jsx';
 import Drawer from '../components/Drawer.jsx';
 import SearchBox from '../components/SearchBox.jsx';
 import { useToast } from '../components/Toast.jsx';
+import {
+  ColumnsMenu, HeaderRow, nextSort, sortRows, tableMinWidth, useColumnPrefs,
+} from '../components/TableColumns.jsx';
 import { api } from '../lib/api.js';
 import { languageName } from '../lib/languages.js';
 
@@ -55,6 +58,31 @@ const int = (n) => Number(n || 0).toLocaleString();
 
 const stateTone = (s) => ({ active: 'badge-ok', stopped: 'badge-bad', deleted: 'badge-idle' }[s] || 'badge-pending');
 
+/**
+ * The campaign table's columns, in display order.
+ *
+ * The metrics live under `metrics` on each row, so they need a `value` to sort
+ * by. The selection checkbox is deliberately absent: it is part of the row but
+ * not a column anyone would sort, hide or resize, so it is rendered separately
+ * as the row's leading cell.
+ */
+const CAMPAIGN_COLUMNS = [
+  { key: 'state',    label: 'Status',  width: 96 },
+  { key: 'id',       label: 'Id',      width: 92 },
+  { key: 'name',     label: 'Name',    width: 240 },
+  { key: 'type',     label: 'Type',    width: 84 },
+  { key: 'vertical', label: 'Vertical', width: 130 },
+  { key: 'offer',    label: 'Offer',   width: 150 },
+  { key: 'country',  label: 'Geo',     width: 72 },
+  { key: 'link',     label: 'Link',    width: 76, sortable: false },
+  { key: 'views',    label: 'Views',   numeric: true, value: (c) => c.metrics.views },
+  { key: 'clicks',   label: 'Clicks',  numeric: true, value: (c) => c.metrics.clicks },
+  { key: 'vtc',      label: 'VTC',     numeric: true, value: (c) => c.metrics.vtc },
+  { key: 'rpc',      label: 'RPC',     numeric: true, value: (c) => c.metrics.rpc },
+  { key: 'rpmv',     label: 'RPMV',    numeric: true, value: (c) => c.metrics.rpmv },
+  { key: 'revenue',  label: 'Revenue', numeric: true, value: (c) => c.metrics.revenue },
+];
+
 export default function Campaigns() {
   const toast = useToast();
 
@@ -66,6 +94,12 @@ export default function Campaigns() {
   const [today, setToday] = useState('');
   const [group, setGroup] = useState('campaign');
   const [search, setSearch] = useState('');
+
+  /* Revenue descending is what this table used to be hard-sorted by, so that
+     stays the opening order — the headers only make it changeable. */
+  const [sort, setSort] = useState({ key: 'revenue', dir: 'desc' });
+  const { hidden, visible, widths, toggle, setWidth, reset, customised } =
+    useColumnPrefs('tonic.campaigns.columns', CAMPAIGN_COLUMNS);
   // Selected campaign ids, as a Set — membership is checked once per row.
   const [selected, setSelected] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -167,10 +201,11 @@ export default function Campaigns() {
   /** Metrics now arrive on the campaign row itself — no join needed. */
   const campaignRows = useMemo(() => {
     const zero = { views: 0, clicks: 0, vtc: 0, rpc: 0, rpmv: 0, revenue: 0 };
-    return campaigns
-      .map((c) => ({ ...c, metrics: c.stats || zero }))
-      .sort((a, b) => b.metrics.revenue - a.metrics.revenue || String(b.id).localeCompare(String(a.id)));
-  }, [campaigns]);
+    const list = campaigns.map((c) => ({ ...c, metrics: c.stats || zero }));
+    return sortRows(list, CAMPAIGN_COLUMNS, sort);
+  }, [campaigns, sort]);
+
+  const toggleSort = (col) => setSort((s) => nextSort(s, col));
 
   /**
    * Selection clears whenever the visible set changes — keeping ids selected
@@ -273,6 +308,69 @@ export default function Campaigns() {
     </>
   );
 
+  const campaignCellClass = (col) => (
+    col.numeric ? 'num'
+      : col.key === 'id' ? 'mono'
+      : col.key === 'vertical' ? 'muted'
+      : undefined
+  );
+
+  const campaignCell = (col, c) => {
+    switch (col.key) {
+      case 'state':    return <span className={`badge ${stateTone(c.state)}`}>{c.state}</span>;
+      case 'id':       return c.id;
+      case 'name':     return <Link className="link" to={`/campaigns/${c.id}`}>{c.name}</Link>;
+      case 'type':     return String(c.type || '').toUpperCase();
+      case 'vertical': return c.vertical;
+      case 'offer':    return c.offer;
+      case 'country':  return c.country;
+      case 'link':
+        return c.directLink ? (
+          <button
+            className="btn btn-ghost"
+            title={c.directLink}
+            onClick={() => {
+              navigator.clipboard?.writeText(c.directLink)
+                .then(() => toast.success('Direct link copied.'))
+                .catch(() => toast.error('Could not copy.'));
+            }}
+          >
+            Copy
+          </button>
+        ) : (
+          <span className="muted">—</span>
+        );
+      case 'views':    return int(c.metrics.views);
+      case 'clicks':   return int(c.metrics.clicks);
+      case 'vtc':      return pct(c.metrics.vtc);
+      default:         return money(c.metrics[col.key]);
+    }
+  };
+
+  const metricFoot = (col, totals) => {
+    switch (col.key) {
+      case 'views':   return int(totals.views);
+      case 'clicks':  return int(totals.clicks);
+      case 'vtc':     return pct(totals.vtc);
+      case 'rpc':     return money(totals.rpc);
+      case 'rpmv':    return money(totals.rpmv);
+      case 'revenue': return money(totals.revenue);
+      default:        return null;
+    }
+  };
+
+  /* The rate columns stay blank on the average row, as they always have:
+     averaging RPC across campaigns would weight a 10-view campaign the same as
+     a 10,000-view one, which is not a number anyone should act on. */
+  const averageFoot = (col, averages) => {
+    switch (col.key) {
+      case 'views':   return int(averages.views);
+      case 'clicks':  return int(averages.clicks);
+      case 'revenue': return money(averages.revenue);
+      default:        return null;
+    }
+  };
+
   const summaryRows = (span) => stats && (
     <>
       <tr className="summary-row">
@@ -365,6 +463,15 @@ export default function Campaigns() {
           </div>
 
           <div className="toolbar">
+            {group === 'campaign' && (
+              <ColumnsMenu
+                columns={CAMPAIGN_COLUMNS}
+                hidden={hidden}
+                toggle={toggle}
+                reset={reset}
+                customised={customised}
+              />
+            )}
             <div className="seg">
               {GROUPS.map((g) => (
                 <button
@@ -408,31 +515,33 @@ export default function Campaigns() {
                 </div>
               </div>
             )}
+            <div
+              className="table-scroll"
+              style={{ '--table-min': tableMinWidth(visible, widths) }}
+            >
             <table>
               <thead>
-                <tr>
-                  <th style={{ width: 36 }}>
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      /* Indeterminate is a DOM property, not an attribute, so
-                         it has to be set on the node itself. */
-                      ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                      onChange={toggleAll}
-                      style={{ width: 'auto' }}
-                      aria-label={allSelected ? 'Clear selection' : 'Select all campaigns'}
-                    />
-                  </th>
-                  <th>Status</th>
-                  <th>Id</th>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Vertical</th>
-                  <th>Offer</th>
-                  <th>Geo</th>
-                  <th>Link</th>
-                  {METRIC_HEADS}
-                </tr>
+                <HeaderRow
+                  columns={visible}
+                  widths={widths}
+                  setWidth={setWidth}
+                  sort={sort}
+                  onSort={toggleSort}
+                  leading={(
+                    <th style={{ width: 36 }}>
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        /* Indeterminate is a DOM property, not an attribute, so
+                           it has to be set on the node itself. */
+                        ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                        onChange={toggleAll}
+                        style={{ width: 'auto' }}
+                        aria-label={allSelected ? 'Clear selection' : 'Select all campaigns'}
+                      />
+                    </th>
+                  )}
+                />
               </thead>
               <tbody>
                 {campaignRows.map((c) => (
@@ -446,36 +555,39 @@ export default function Campaigns() {
                         aria-label={`Select ${c.name || c.id}`}
                       />
                     </td>
-                    <td><span className={`badge ${stateTone(c.state)}`}>{c.state}</span></td>
-                    <td className="mono">{c.id}</td>
-                    <td><Link className="link" to={`/campaigns/${c.id}`}>{c.name}</Link></td>
-                    <td>{String(c.type || '').toUpperCase()}</td>
-                    <td className="muted">{c.vertical}</td>
-                    <td>{c.offer}</td>
-                    <td>{c.country}</td>
-                    <td>
-                      {c.directLink ? (
-                        <button
-                          className="btn btn-ghost"
-                          title={c.directLink}
-                          onClick={() => {
-                            navigator.clipboard?.writeText(c.directLink)
-                              .then(() => toast.success('Direct link copied.'))
-                              .catch(() => toast.error('Could not copy.'));
-                          }}
-                        >
-                          Copy
-                        </button>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    {metricCells(c.metrics)}
+                    {visible.map((col) => (
+                      <td key={col.key} className={campaignCellClass(col)}>
+                        {campaignCell(col, c)}
+                      </td>
+                    ))}
                   </tr>
                 ))}
-                {summaryRows(9)}
+                {/* No colSpan: the label takes the first visible column and
+                    every other cell comes from the same list as the header, so
+                    hiding a column cannot shift a total off its heading. */}
+                {stats && (
+                  <>
+                    <tr className="summary-row">
+                      <td />
+                      {visible.map((col, i) => (
+                        <td key={col.key} className={i === 0 ? 'label' : (col.numeric ? 'num' : undefined)}>
+                          {i === 0 ? 'Total' : metricFoot(col, stats.totals)}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="summary-row">
+                      <td />
+                      {visible.map((col, i) => (
+                        <td key={col.key} className={i === 0 ? 'label' : (col.numeric ? 'num' : undefined)}>
+                          {i === 0 ? 'Average' : averageFoot(col, stats.averages)}
+                        </td>
+                      ))}
+                    </tr>
+                  </>
+                )}
               </tbody>
             </table>
+            </div>
             </>
           )
         ) : (

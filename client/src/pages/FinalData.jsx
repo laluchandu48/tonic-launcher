@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom';
 import Layout from '../components/Layout.jsx';
 import SearchBox from '../components/SearchBox.jsx';
 import Switch from '../components/Switch.jsx';
+import {
+  ColumnsMenu, HeaderRow, nextSort, sortRows, tableMinWidth, useColumnPrefs,
+} from '../components/TableColumns.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { api } from '../lib/api.js';
 
@@ -47,8 +50,12 @@ const statusLabel = (s) => String(s || '').toLowerCase().replace(/_/g, ' ') || '
  * is almost always "where is the money", while a name opens A–Z.
  */
 const COLUMNS = [
-  { key: 'status',      label: 'On', sortable: false },
-  { key: 'adsetName',   label: 'Adset' },
+  /* Pinned: the switch is how a row gets turned off, so hiding it would take
+     the control away with no way back. Its width is fixed because the two
+     frozen columns are positioned against it. */
+  { key: 'status', label: 'On', sortable: false, pinned: true, resizable: false,
+    width: 52, sticky: 'col-pin-a' },
+  { key: 'adsetName',   label: 'Adset',   width: 260, sticky: 'col-pin-b' },
   { key: 'budget',      label: 'Budget',  numeric: true },
   { key: 'spend',       label: 'Spend',   numeric: true },
   { key: 'revenue',     label: 'Revenue', numeric: true },
@@ -80,6 +87,14 @@ export default function FinalData() {
   const [search, setSearch] = useState('');
   const [onlyMatched, setOnlyMatched] = useState(false);
   const [sort, setSort] = useState({ key: 'spend', dir: 'desc' });
+
+  /* Which columns show and how wide they are, remembered in this browser. */
+  const { hidden, visible, widths, toggle, setWidth, reset, customised } =
+    useColumnPrefs('tonic.finalData.columns', COLUMNS);
+
+  /* The unmatched list is a diagnostic, not part of the daily read, so it
+     stays folded away until asked for. */
+  const [showUnmatched, setShowUnmatched] = useState(false);
 
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
@@ -245,32 +260,10 @@ export default function FinalData() {
           .some((v) => String(v || '').toLowerCase().includes(q))
       );
     }
-    const col = COLUMNS.find((c) => c.key === sort.key);
-    const sign = sort.dir === 'asc' ? 1 : -1;
-
-    return [...list].sort((a, b) => {
-      const x = a[sort.key];
-      const y = b[sort.key];
-
-      // A missing value is not a small one — an adset with no CPL hasn't got
-      // the cheapest leads. Blanks sink to the bottom either way.
-      const xMissing = x == null || x === '';
-      const yMissing = y == null || y === '';
-      if (xMissing || yMissing) return xMissing && yMissing ? 0 : xMissing ? 1 : -1;
-
-      if (col?.numeric) return (Number(x) - Number(y)) * sign;
-      return String(x).localeCompare(String(y), undefined, { sensitivity: 'base' }) * sign;
-    });
+    return sortRows(list, COLUMNS, sort);
   }, [data, onlyMatched, search, sort]);
 
-  /** First click sorts the way that column is usually read; second reverses. */
-  const toggleSort = (col) => {
-    setSort((s) =>
-      s.key === col.key
-        ? { key: col.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
-        : { key: col.key, dir: col.numeric ? 'desc' : 'asc' }
-    );
-  };
+  const toggleSort = (col) => setSort((s) => nextSort(s, col));
 
   if (blocked) {
     return (
@@ -290,6 +283,130 @@ export default function FinalData() {
   }
 
   const t = data?.totals;
+
+  /* One cell, by column key. Driving the body off the same list as the header
+     is what keeps the two in step: the previous hand-written rows had the
+     switch and the adset name in the opposite order to their headings. */
+  const budgetCell = (r) => (
+    editingBudget === r.adsetId ? (
+      <input
+        type="number"
+        min="1"
+        step="1"
+        value={budgetDraft}
+        autoFocus
+        disabled={savingBudget}
+        onChange={(e) => setBudgetDraft(e.target.value)}
+        onBlur={() => saveBudget(r)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') saveBudget(r);
+          if (e.key === 'Escape') setEditingBudget(null);
+        }}
+        style={{ width: 90, textAlign: 'right', padding: '4px 6px' }}
+        aria-label={`Daily budget for ${r.adsetName || r.adsetId}`}
+      />
+    ) : r.budget != null && r.budgetType === 'daily' ? (
+      <button
+        className="btn btn-ghost"
+        style={{ padding: '2px 6px' }}
+        onClick={() => openBudget(r)}
+        title={r.budgetLevel === 'campaign'
+          ? `Campaign budget for ${r.campaignName || 'this campaign'} — changing it affects every adset in it`
+          : 'Click to change the daily budget'}
+      >
+        {money(r.budget)}
+        {r.budgetLevel === 'campaign' && (
+          <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>CBO</span>
+        )}
+      </button>
+    ) : r.budget != null ? (
+      <span className="muted" title="Lifetime budget — change it in Ads Manager">
+        {money(r.budget)} total
+      </span>
+    ) : (
+      <span className="muted" title="No budget found on this adset or its campaign">—</span>
+    )
+  );
+
+  const cell = (col, r) => {
+    switch (col.key) {
+      case 'status':
+        return (
+          <Switch
+            checked={String(r.status || '').toUpperCase() === 'ACTIVE'}
+            busy={togglingAdset === r.adsetId}
+            onChange={(v) => toggleAdset(r, v)}
+            label={`${r.adsetName || r.adsetId} — ${statusLabel(r.status)}`}
+          />
+        );
+      case 'adsetName':
+        return (
+          <>
+            {/* New tab, as asked — so the table you were reading stays where it
+                was while you look at one adset's history. */}
+            <a
+              className="link"
+              href={`/final-data/adsets/${r.adsetId}?account=${encodeURIComponent(accountId)}`}
+              target="_blank"
+              rel="noreferrer"
+              title="Open this adset's day-by-day history in a new tab"
+            >
+              {r.adsetName || r.adsetId}
+            </a>
+            <div className="muted mono" style={{ fontSize: 11 }}>
+              {r.adsetId}
+              {/* The delivery state still matters when it is not simply on or
+                  off — a campaign-level pause is not the adset's own doing,
+                  and the switch cannot show that. */}
+              {!['ACTIVE', 'PAUSED'].includes(String(r.status || '').toUpperCase()) && (
+                <span className={`badge ${statusTone(r.status)}`} style={{ marginLeft: 6 }}>
+                  {statusLabel(r.status)}
+                </span>
+              )}
+            </div>
+          </>
+        );
+      case 'budget':  return budgetCell(r);
+      case 'spend':   return money(r.spend);
+      case 'revenue':
+        return r.matched ? money(r.revenue) : (
+          <span className="muted" title="No Tonic sessions carried this adset ID">—</span>
+        );
+      case 'profit':  return money(r.profit);
+      case 'roi':     return r.roi == null ? dash : `${r.roi} %`;
+      case 'cpl':     return r.cpl == null ? dash : money(r.cpl);
+      case 'rpc':     return r.rpc == null ? dash : money(r.rpc);
+      default:        return int(r[col.key]);
+    }
+  };
+
+  const footCell = (col, totals) => {
+    switch (col.key) {
+      case 'status':
+      case 'adsetName': return null;
+      case 'budget':    return money(totals.budget);
+      case 'spend':     return money(totals.spend);
+      case 'revenue':   return money(totals.revenue);
+      case 'profit':    return money(totals.profit);
+      case 'roi':       return totals.roi == null ? dash : `${totals.roi} %`;
+      case 'cpl':       return totals.cpl == null ? dash : money(totals.cpl);
+      case 'rpc':       return totals.rpc == null ? dash : money(totals.rpc);
+      default:          return int(totals[col.key]);
+    }
+  };
+
+  /* "Total" goes in the Adset column where there is one, which is where it has
+     always appeared — not in the 52px switch column, which would clip it. With
+     the Adset column hidden it falls back to the first cell. */
+  const totalLabelAt = Math.max(0, visible.findIndex((c) => c.key === 'adsetName'));
+
+  /* Profit and ROI are the two numbers people act on, so they carry a colour
+     in the body and in the totals alike. */
+  const tdClass = (col, row) => [
+    col.numeric ? 'num' : '',
+    col.sticky || '',
+    row && (col.key === 'profit' || col.key === 'roi') ? tone(row[col.key]) : '',
+  ].filter(Boolean).join(' ') || undefined;
 
   return (
     <Layout
@@ -374,6 +491,14 @@ export default function FinalData() {
               minLength={1}
               width={240}
             />
+
+            <ColumnsMenu
+              columns={COLUMNS}
+              hidden={hidden}
+              toggle={toggle}
+              reset={reset}
+              customised={customised}
+            />
           </div>
 
           {data?.meta && (
@@ -403,142 +528,49 @@ export default function FinalData() {
         ) : (
           /* Thirteen columns do not fit a phone, and compressing them makes
              every one unreadable. The table keeps real widths and scrolls
-             inside this container; the toolbar above it stays put. */
-          <div className="table-scroll">
+             inside this container; the toolbar above it stays put. Hiding
+             columns shrinks the minimum width with them, so turning a few off
+             genuinely buys room rather than just widening the rest. */
+          <div
+            className="table-scroll"
+            style={{ '--table-min': tableMinWidth(visible, widths) }}
+          >
           <table>
             <thead>
-              <tr>
-                {COLUMNS.map((col) => (
-                  <th
-                    key={col.key}
-                    className={col.numeric ? 'num' : undefined}
-                    title={col.title}
-                    aria-sort={sort.key === col.key
-                      ? (sort.dir === 'asc' ? 'ascending' : 'descending')
-                      : 'none'}
-                  >
-                    {col.sortable === false ? col.label : (
-                      <button className="th-sort" onClick={() => toggleSort(col)}>
-                        {col.label}
-                        <span className={`sort-arrow ${sort.key === col.key ? 'on' : ''}`}>
-                          {sort.key === col.key ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}
-                        </span>
-                      </button>
-                    )}
-                  </th>
-                ))}
-              </tr>
+              <HeaderRow
+                columns={visible}
+                widths={widths}
+                setWidth={setWidth}
+                sort={sort}
+                onSort={toggleSort}
+              />
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.adsetId}>
-                  <td>
-                    {/* New tab, as asked — so the table you were reading stays
-                        where it was while you look at one adset's history. */}
-                    <a
-                      className="link"
-                      href={`/final-data/adsets/${r.adsetId}?account=${encodeURIComponent(accountId)}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Open this adset's day-by-day history in a new tab"
-                    >
-                      {r.adsetName || r.adsetId}
-                    </a>
-                    <div className="muted mono" style={{ fontSize: 11 }}>
-                      {r.adsetId}
-                      {/* The delivery state still matters when it is not simply
-                          on or off — a campaign-level pause is not the adset's
-                          own doing, and the switch cannot show that. */}
-                      {!['ACTIVE', 'PAUSED'].includes(String(r.status || '').toUpperCase()) && (
-                        <span className={`badge ${statusTone(r.status)}`} style={{ marginLeft: 6 }}>
-                          {statusLabel(r.status)}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    <Switch
-                      checked={String(r.status || '').toUpperCase() === 'ACTIVE'}
-                      busy={togglingAdset === r.adsetId}
-                      onChange={(v) => toggleAdset(r, v)}
-                      label={`${r.adsetName || r.adsetId} — ${statusLabel(r.status)}`}
-                    />
-                  </td>
-                  <td className="num">
-                    {editingBudget === r.adsetId ? (
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={budgetDraft}
-                        autoFocus
-                        disabled={savingBudget}
-                        onChange={(e) => setBudgetDraft(e.target.value)}
-                        onBlur={() => saveBudget(r)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') saveBudget(r);
-                          if (e.key === 'Escape') setEditingBudget(null);
-                        }}
-                        style={{ width: 90, textAlign: 'right', padding: '4px 6px' }}
-                        aria-label={`Daily budget for ${r.adsetName || r.adsetId}`}
-                      />
-                    ) : r.budget != null && r.budgetType === 'daily' ? (
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '2px 6px' }}
-                        onClick={() => openBudget(r)}
-                        title={r.budgetLevel === 'campaign'
-                          ? `Campaign budget for ${r.campaignName || 'this campaign'} — changing it affects every adset in it`
-                          : 'Click to change the daily budget'}
-                      >
-                        {money(r.budget)}
-                        {r.budgetLevel === 'campaign' && (
-                          <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>CBO</span>
-                        )}
-                      </button>
-                    ) : r.budget != null ? (
-                      <span className="muted" title="Lifetime budget — change it in Ads Manager">
-                        {money(r.budget)} total
-                      </span>
-                    ) : (
-                      <span className="muted" title="No budget found on this adset or its campaign">—</span>
-                    )}
-                  </td>
-                  <td className="num">{money(r.spend)}</td>
-                  <td className="num">
-                    {r.matched ? money(r.revenue) : (
-                      <span className="muted" title="No Tonic sessions carried this adset ID">—</span>
-                    )}
-                  </td>
-                  <td className={`num ${tone(r.profit)}`}>{money(r.profit)}</td>
-                  <td className={`num ${tone(r.roi)}`}>{r.roi == null ? dash : `${r.roi} %`}</td>
-                  <td className="num">{r.cpl == null ? dash : money(r.cpl)}</td>
-                  <td className="num">{r.rpc == null ? dash : money(r.rpc)}</td>
-                  <td className="num">{int(r.leads)}</td>
-                  <td className="num">{int(r.conversions)}</td>
-                  <td className="num">{int(r.impressions)}</td>
-                  <td className="num">{int(r.clicks)}</td>
+                  {visible.map((col) => (
+                    <td key={col.key} className={tdClass(col, r)}>{cell(col, r)}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>
             {t && (
               <tfoot>
                 <tr className="summary-row">
-                  {/* Spans On + Adset only. COLUMNS.length must equal this
-                      span plus the data cells below, or every total lands one
-                      column to the right of what it is totalling. */}
-                  <td className="label" colSpan={2}>Total</td>
-                  <td className="num">{money(t.budget)}</td>
-                  <td className="num">{money(t.spend)}</td>
-                  <td className="num">{money(t.revenue)}</td>
-                  <td className={`num ${tone(t.profit)}`}>{money(t.profit)}</td>
-                  <td className={`num ${tone(t.roi)}`}>{t.roi == null ? dash : `${t.roi} %`}</td>
-                  <td className="num">{t.cpl == null ? dash : money(t.cpl)}</td>
-                  <td className="num">{t.rpc == null ? dash : money(t.rpc)}</td>
-                  <td className="num">{int(t.leads)}</td>
-                  <td className="num">{int(t.conversions)}</td>
-                  <td className="num">{int(t.impressions)}</td>
-                  <td className="num">{int(t.clicks)}</td>
+                  {/* No colSpan anywhere: the label sits in the first visible
+                      column and every other cell is produced by the same list
+                      the header and body use, so a total cannot drift a column
+                      away from what it totals. */}
+                  {visible.map((col, i) => (
+                    <td
+                      key={col.key}
+                      className={i === totalLabelAt
+                        ? ['label', col.sticky].filter(Boolean).join(' ')
+                        : tdClass(col, t)}
+                    >
+                      {i === totalLabelAt ? 'Total' : footCell(col, t)}
+                    </td>
+                  ))}
                 </tr>
               </tfoot>
             )}
@@ -549,12 +581,32 @@ export default function FinalData() {
 
       {data?.unmatched?.length > 0 && (
         <div className="card">
-          <div className="card-head">
-            <h2>Tonic revenue with no Facebook adset</h2>
+          <div
+            className="card-head disclosure"
+            role="button"
+            tabIndex={0}
+            aria-expanded={showUnmatched}
+            onClick={() => setShowUnmatched((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setShowUnmatched((v) => !v);
+              }
+            }}
+          >
+            <h2>
+              <span className={`disclosure-caret ${showUnmatched ? 'open' : ''}`} aria-hidden="true">▸</span>
+              Tonic revenue with no Facebook adset
+              <span className="muted" style={{ fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
+                {data.unmatched.length} value{data.unmatched.length === 1 ? '' : 's'}
+              </span>
+            </h2>
             <div className="muted" style={{ fontSize: 12 }}>
               {money(data.totals.unmatchedRevenue)} in total
             </div>
           </div>
+          {showUnmatched && (
+          <>
           <p className="hint" style={{ padding: '0 16px' }}>
             Sessions whose <code>{data.meta.param}</code> value matches no adset in this ad account —
             traffic from elsewhere, an adset outside the range, or a tracking link that is not
@@ -571,7 +623,7 @@ export default function FinalData() {
               </tr>
             </thead>
             <tbody>
-              {data.unmatched.slice(0, 50).map((r) => (
+              {data.unmatched.map((r) => (
                 <tr key={r.key}>
                   <td className="mono">{r.key}</td>
                   <td className="num">{int(r.sessions)}</td>
@@ -582,6 +634,8 @@ export default function FinalData() {
             </tbody>
           </table>
           </div>
+          </>
+          )}
         </div>
       )}
       {(data?.notes || []).length > 0 && (
