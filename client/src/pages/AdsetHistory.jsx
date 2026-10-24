@@ -40,6 +40,7 @@ const RANGES = {
   last14: { label: 'Last 14 days', days: 14 },
   last30: { label: 'Last 30 days', days: 30 },
   last50: { label: 'Last 50 days', days: 50 },
+  custom: { label: 'Custom range…', custom: true },
 };
 
 const money = (n) => `${Number(n || 0).toFixed(2)} $`;
@@ -79,18 +80,40 @@ export default function AdsetHistory() {
   const toast = useToast();
 
   const [rangeKey, setRangeKey] = useState(params.get('range') || 'all');
+  const [customFrom, setCustomFrom] = useState(params.get('from') || '');
+  const [customTo, setCustomTo] = useState(params.get('to') || '');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const today = new Date().toISOString().slice(0, 10);
+
   const range = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    if (RANGES[rangeKey]?.custom) {
+      // Nothing to fetch until both ends are set; the effect below skips it.
+      if (!customFrom || !customTo) return null;
+      // Entered the wrong way round is a slip, not an error worth refusing.
+      const [a, b] = customFrom <= customTo ? [customFrom, customTo] : [customTo, customFrom];
+      return { from: a < DATA_START ? DATA_START : a, to: b > today ? today : b };
+    }
     const days = RANGES[rangeKey]?.days ?? null;
     const from = days ? shift(today, -(days - 1)) : DATA_START;
     // Never ask for days that predate the dashboard.
     return { from: from < DATA_START ? DATA_START : from, to: today };
-  }, [rangeKey]);
+  }, [rangeKey, customFrom, customTo, today]);
+
+  /* Opening the custom range with a sensible week in it beats opening it
+     empty and making someone fill in both ends before anything happens. */
+  const chooseRange = (key) => {
+    if (key === 'custom' && (!customFrom || !customTo)) {
+      const start = shift(today, -6);
+      setCustomFrom(start < DATA_START ? DATA_START : start);
+      setCustomTo(today);
+    }
+    setRangeKey(key);
+  };
 
   const load = useCallback(async () => {
+    if (!range) return;
     setLoading(true);
     try {
       setData(await api.finalData.adsetHistory(id, { ...range, account: params.get('account') || undefined }));
@@ -116,14 +139,41 @@ export default function AdsetHistory() {
     <Layout
       title={data?.adset?.name || `Adset ${id}`}
       tools={
-        <select
-          className="topbar-select"
-          value={rangeKey}
-          onChange={(e) => setRangeKey(e.target.value)}
-          aria-label="Date range"
-        >
-          {Object.entries(RANGES).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
-        </select>
+        <div className="toolbar">
+          <select
+            className="topbar-select"
+            value={rangeKey}
+            onChange={(e) => chooseRange(e.target.value)}
+            aria-label="Date range"
+          >
+            {Object.entries(RANGES).map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
+          </select>
+
+          {RANGES[rangeKey]?.custom && (
+            <>
+              <input
+                type="date"
+                className="topbar-select"
+                value={customFrom}
+                min={DATA_START}
+                max={customTo || today}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                aria-label="Start date"
+              />
+              <span className="muted" style={{ fontSize: 12 }}>to</span>
+              <input
+                type="date"
+                className="topbar-select"
+                value={customTo}
+                min={customFrom || DATA_START}
+                /* Tonic has no data for a day it has not reached. */
+                max={today}
+                onChange={(e) => setCustomTo(e.target.value)}
+                aria-label="End date"
+              />
+            </>
+          )}
+        </div>
       }
       actions={
         <button className="btn btn-secondary" onClick={load} disabled={loading}>

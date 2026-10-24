@@ -113,10 +113,19 @@ async function fetchTonicDay(date, param) {
  * Fill the cache for the range. A day Tonic has finalised is fetched once and
  * kept; today and any still-open day are refetched every time.
  */
+/**
+ * Tonic's session report has a maximum date, and it is normally yesterday —
+ * the current day is not reportable until Tonic closes it. Asking for it fails
+ * the request outright ("later than the maximum date"), which took the whole
+ * screen down over a day that simply has no numbers yet.
+ */
+const BEYOND_TONIC_MAX = /later than the maximum date/i;
+
 async function ensureTonicRange(from, to, param, lastFinalDate) {
   let fetched = 0;
   let cached = 0;
   const truncatedDays = [];
+  const unreported = [];
 
   for (const date of eachDay(from, to)) {
     const isFinal = Boolean(lastFinalDate) && date <= lastFinalDate;
@@ -128,7 +137,19 @@ async function ensureTonicRange(from, to, param, lastFinalDate) {
       continue;
     }
 
-    const day = await fetchTonicDay(date, param);
+    let day;
+    try {
+      day = await fetchTonicDay(date, param);
+    } catch (err) {
+      /* Only the "not reportable yet" case is swallowed. A day Tonic cannot
+         report yet counts as zero rather than as a failure, and is stored
+         incomplete so it fills in for real once Tonic has it. Any other error
+         is a genuine problem and still travels. */
+      if (!BEYOND_TONIC_MAX.test(err?.message || '')) throw err;
+      day = { rows: [], sessions: 0, truncated: false };
+      unreported.push(date);
+    }
+
     sessionDays.replaceDay(date, param, day.rows, {
       complete: isFinal ? 1 : 0,
       truncated: day.truncated ? 1 : 0,
@@ -138,7 +159,7 @@ async function ensureTonicRange(from, to, param, lastFinalDate) {
     if (day.truncated) truncatedDays.push(date);
   }
 
-  return { fetched, cached, truncatedDays };
+  return { fetched, cached, truncatedDays, unreported };
 }
 
 router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req, res) => {
@@ -309,6 +330,9 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
   if (lastFinalDate && to > lastFinalDate) {
     notes.push(`Tonic has finalised revenue through ${lastFinalDate}; anything after that is an estimate and can still change.`);
   }
+  if (tonicFill.unreported.length) {
+    notes.push(unreportedNote(tonicFill.unreported));
+  }
 
   res.json({
     rows,
@@ -460,6 +484,10 @@ router.get('/adsets/:id/history', requireCredentials, requireFbCredentials, asyn
     };
   });
 
+  if (tonicFill.unreported.length) {
+    notes.push(unreportedNote(tonicFill.unreported));
+  }
+
   const sum = (f) => rows.reduce((n, r) => n + (Number(r[f]) || 0), 0);
   const spend = sum('spend');
   const revenue = sum('revenue');
@@ -576,6 +604,11 @@ export function totalsFrom(rows) {
     currency: 'USD',
   };
 }
+
+/** Said the same way wherever a day could not be asked for yet. */
+const unreportedNote = (days) =>
+  `Tonic has no session report yet for ${days.join(', ')}, so ${days.length === 1 ? 'that day is' : 'those days are'} counted as zero revenue. `
+  + 'It usually closes a day the following morning.';
 
 const SUMMARY_TTL_MS = 10 * 60_000;
 const accountsSummary = new Map(); // `${from}|${to}|${param}` -> { at, payload }
@@ -702,6 +735,9 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
   }
   if (lastFinalDate && to > lastFinalDate) {
     notes.push(`Tonic has finalised revenue through ${lastFinalDate}; anything after that is an estimate and can still change.`);
+  }
+  if (tonicFill.unreported.length) {
+    notes.push(unreportedNote(tonicFill.unreported));
   }
 
   const payload = {

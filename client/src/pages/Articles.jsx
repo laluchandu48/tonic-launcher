@@ -3,6 +3,7 @@ import Layout from '../components/Layout.jsx';
 import Drawer from '../components/Drawer.jsx';
 import { useToast } from '../components/Toast.jsx';
 import Picker from '../components/Picker.jsx';
+import SearchBox from '../components/SearchBox.jsx';
 import { api } from '../lib/api.js';
 import { languageName, byLanguageName } from '../lib/languages.js';
 
@@ -30,6 +31,7 @@ const emptyForm = {
 export default function Articles() {
   const toast = useToast();
   const [requests, setRequests] = useState([]);
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -100,6 +102,22 @@ export default function Articles() {
   };
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  /**
+   * Filtering happens here rather than at the API: these rows are already
+   * loaded, so a one-character search should narrow them immediately instead
+   * of costing a round trip. It searches everything visible in the row —
+   * request ID, article ID, status, offer, GEO, language and domain — because
+   * guessing which column someone means is how a search box disappoints.
+   */
+  const visibleRequests = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return requests;
+    return requests.filter((r) => [
+      r.tonic_request_id, r.articleId, r.headline_id, r.status,
+      r.offer_name, r.offer_id, r.country, languageName(r.language), r.domain,
+    ].some((v) => String(v ?? '').toLowerCase().includes(q)));
+  }, [requests, search]);
 
   /** A domain only accepts certain languages, so the choice of domain narrows it. */
   const languageOptions = useMemo(() => {
@@ -212,6 +230,13 @@ export default function Articles() {
         <div className="card-head">
           <h2>Article requests</h2>
           <div className="toolbar">
+            <SearchBox
+              value={search}
+              onSearch={setSearch}
+              placeholder="Search requests"
+              minLength={1}
+              width={240}
+            />
             <button className="btn btn-secondary" onClick={load} disabled={loading || needsCredentials}>
               {loading && <span className="spinner" />}
               {loading ? 'Loading…' : 'Refresh'}
@@ -225,6 +250,11 @@ export default function Articles() {
           <div className="empty">
             <p>No article requests yet.</p>
             <button className="btn" onClick={openDrawer} disabled={needsCredentials}>Create the first one</button>
+          </div>
+        ) : visibleRequests.length === 0 ? (
+          <div className="empty">
+            <p>No request matches “{search}”.</p>
+            <button className="btn btn-ghost" onClick={() => setSearch('')}>Clear search</button>
           </div>
         ) : (
           <table>
@@ -243,7 +273,7 @@ export default function Articles() {
               </tr>
             </thead>
             <tbody>
-              {requests.map((r) => (
+              {visibleRequests.map((r) => (
                 <tr key={r.id}>
                   <td className="mono">{r.tonic_request_id || <span className="muted">—</span>}</td>
                   <td className="mono">{r.articleId ?? r.headline_id ?? <span className="muted">—</span>}</td>
