@@ -739,6 +739,58 @@ body.col-resizing * { cursor: col-resize !important; }
 }
 .disclosure-caret.open { transform: rotate(90deg); }
 
+/* ─── Page tabs (Campaigns: Overview / Keywords) ──────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tab {
+  padding: 9px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ─── Keywords: the expanded detail under a row ───────────────────────────── */
+
+tr.detail-row > td { background: var(--surface-2); padding: 0 0 14px; }
+tr.detail-row:hover > td { background: var(--surface-2); }
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 10px;
+}
+
+/* A table inside a table: the inner one drops the outer's row borders so the
+   two do not read as one striped block. */
+.detail-table { width: auto; min-width: 560px; }
+.detail-table th { padding: 6px 14px 6px 0; border-bottom: 1px solid var(--line); }
+.detail-table td { padding: 7px 14px 7px 0; border-bottom: 1px solid var(--line-soft); }
+.detail-table tr:last-child td { border-bottom: none; }
+.detail-table tbody tr:hover { background: transparent; }
+
+/* ─── Card footer (pagination) ────────────────────────────────────────────── */
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
 /* ─── Ad-account multi-select ─────────────────────────────────────────────── */
 
 /* A grid rather than a long column: twenty accounts in one list means

@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Articles from './pages/Articles.jsx';
 import Campaigns from './pages/Campaigns.jsx';
 import CampaignDetail from './pages/CampaignDetail.jsx';
+import Keywords from './pages/Keywords.jsx';
 import Compliance from './pages/Compliance.jsx';
 import FinalData from './pages/FinalData.jsx';
 import AdsetHistory from './pages/AdsetHistory.jsx';
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/articles" element={<Articles />} />
         <Route path="/campaigns" element={<Campaigns />} />
+        <Route path="/campaigns/keywords" element={<Keywords />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/compliance" element={<Compliance />} />
         <Route path="/final-data" element={<FinalData />} />

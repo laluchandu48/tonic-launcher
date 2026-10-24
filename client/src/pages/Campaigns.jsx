@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Layout from '../components/Layout.jsx';
 import Drawer from '../components/Drawer.jsx';
+import CampaignTabs from '../components/CampaignTabs.jsx';
 import SearchBox from '../components/SearchBox.jsx';
 import { useToast } from '../components/Toast.jsx';
 import {
@@ -394,6 +395,8 @@ export default function Campaigns() {
       title="Campaigns"
       actions={<button className="btn" onClick={openDrawer} disabled={needsCredentials}>Create Campaign</button>}
     >
+      <CampaignTabs />
+
       {needsCredentials && (
         <div className="banner banner-warn">
           <span>⚠</span>

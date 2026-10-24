@@ -325,6 +325,19 @@ export class TonicV4Client {
     return this.request('GET', '/statistics/status');
   }
 
+  /**
+   * Keyword performance for a range: one row per keyword, carrying the
+   * campaigns it ran in, the countries and offers it touched, and its clicks,
+   * revenue and RPC.
+   *
+   * v4 caps the range at 30 days. `grouping` always includes keyword; adding
+   * campaignId or countryCode splits a keyword into one row per campaign or
+   * country instead of nesting them.
+   */
+  getKeywordStats(query = {}) {
+    return this.request('GET', '/statistics/keywords', { query });
+  }
+
   /** One day of session rows, paginated — replaces v3's session/daily. */
   getSessionReport({ date, campaignType = 'rsoc', ...rest }) {
     return this.request('GET', '/analytics/reports/session', {

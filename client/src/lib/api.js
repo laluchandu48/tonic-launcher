@@ -166,6 +166,18 @@ export const api = {
     clear: () => request('/fb-settings', { method: 'DELETE' }),
   },
 
+  keywords: {
+    /* Empty filters are dropped rather than sent: v4 treats an empty value as
+       a filter that matches nothing. */
+    get: (params = {}) => {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null && String(v) !== '') q.set(k, String(v));
+      }
+      return request(`/keywords?${q}`);
+    },
+  },
+
   campaigns: {
     list: (state = 'active', params = {}) =>
       request(`/campaigns?${new URLSearchParams({ state, ...params })}`),
