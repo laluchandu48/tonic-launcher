@@ -114,7 +114,7 @@ export default function Articles() {
     const q = search.trim().toLowerCase();
     if (!q) return requests;
     return requests.filter((r) => [
-      r.tonic_request_id, r.articleId, r.headline_id, r.status,
+      r.tonic_request_id, r.articleId, r.headline_id, r.status, r.headline,
       r.offer_name, r.offer_id, r.country, languageName(r.language), r.domain,
     ].some((v) => String(v ?? '').toLowerCase().includes(q)));
   }, [requests, search]);
@@ -260,9 +260,9 @@ export default function Articles() {
           <table>
             <thead>
               <tr>
-                <th>Request</th>
                 <th>Article ID</th>
                 <th>Status</th>
+                <th>Title</th>
                 <th>Offer</th>
                 <th>GEO</th>
                 <th>Language</th>
@@ -275,11 +275,26 @@ export default function Articles() {
             <tbody>
               {visibleRequests.map((r) => (
                 <tr key={r.id}>
-                  <td className="mono">{r.tonic_request_id || <span className="muted">—</span>}</td>
                   <td className="mono">{r.articleId ?? r.headline_id ?? <span className="muted">—</span>}</td>
                   <td>
                     <span className={`badge ${statusTone(r.status)}`}>{r.status}</span>
                     {r.error && <div className="error-text" title={r.error}>{r.error.slice(0, 80)}</div>}
+                  </td>
+                  <td>
+                    {/* The title links to the published article, opened in a new
+                        tab so the list you were reading stays where it was. An
+                        article that is not published yet has no URL, so it shows
+                        as plain text rather than a link that goes nowhere. */}
+                    {!r.headline ? <span className="muted">—</span>
+                      : r.url ? (
+                        <a className="link" href={r.url} target="_blank" rel="noreferrer"
+                           title={`Open "${r.headline}" in a new tab`}>
+                          <span aria-hidden="true" style={{ marginRight: 5, fontSize: 11 }}>↗</span>
+                          {r.headline}
+                        </a>
+                      ) : (
+                        <span title="No published article to open yet">{r.headline}</span>
+                      )}
                   </td>
                   <td>{r.offer_name || r.offer_id || <span className="muted">—</span>}</td>
                   <td>{r.country}</td>

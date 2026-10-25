@@ -76,6 +76,38 @@ router.get('/', asyncRoute(async (req, res) => {
 
   const remote = (Array.isArray(data) ? data : []).map(present);
 
+  /*
+   * An article request knows its articleId but not the article's URL — that
+   * lives on /articles. Rather than one lookup per row, the ids on this page
+   * are fetched in a single call using the articleIds filter.
+   *
+   * Non-fatal on purpose: if it fails, the titles simply aren't links. A list
+   * of articles is still useful without them, and losing the whole screen over
+   * a decoration would not be.
+   */
+  const articleIds = [...new Set(remote.map((r) => r.articleId).filter((id) => id != null))];
+  if (articleIds.length) {
+    try {
+      const { data: articles } = await getV4Client().getArticles({
+        articleIds: articleIds.join(','),
+        limit: Math.min(articleIds.length, 100),
+      });
+      const byId = new Map(
+        (Array.isArray(articles) ? articles : []).map((a) => [String(a.id), a])
+      );
+      for (const row of remote) {
+        const article = byId.get(String(row.articleId));
+        if (!article) continue;
+        row.url = article.url || null;
+        // The published title wins: a request's title can be edited by Tonic
+        // before publication, and the live article is what the link opens.
+        row.headline = article.title || row.headline;
+      }
+    } catch {
+      /* see above */
+    }
+  }
+
   // Attempts Tonic refused outright never got an id, so they exist only locally.
   const localOnly = articleRequests.list()
     .filter((r) => !r.tonic_request_id && r.error)
