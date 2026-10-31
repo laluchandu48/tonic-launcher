@@ -239,6 +239,55 @@ export class TonicV4Client {
   }
 
   /** Offers, optionally narrowed to a country and/or an RSOC domain. */
+  /** Update the signed-in user. v4 accepts only these two fields. */
+  patchAccount({ firstName, lastName }) {
+    const body = {};
+    if (firstName !== undefined) body.firstName = firstName;
+    if (lastName !== undefined) body.lastName = lastName;
+    return this.request('PATCH', '/account', { body });
+  }
+
+  // ─── API credentials ───────────────────────────────────────────────────────
+
+  getApiCredentials() {
+    return this.request('GET', '/account/apiCredentials');
+  }
+
+  /** `validUntil` is a date and v4 refuses anything beyond twelve months out. */
+  createApiCredential({ name, description, validUntil }) {
+    return this.request('POST', '/account/apiCredentials', {
+      body: { name, description, validUntil },
+    });
+  }
+
+  getApiCredential(id) {
+    return this.request('GET', `/account/apiCredentials/${encodeURIComponent(id)}`);
+  }
+
+  deleteApiCredential(id) {
+    return this.request('DELETE', `/account/apiCredentials/${encodeURIComponent(id)}`);
+  }
+
+  // ─── Managed access (Tonic's access to your ad accounts) ───────────────────
+
+  /** Whether Tonic holds credentials for this provider at all. */
+  getManagedAccess(provider) {
+    return this.request('GET', `/managedAccess/providers/${encodeURIComponent(provider)}`);
+  }
+
+  /** Whether Tonic can actually see one ad account — one account per call. */
+  getManagedAccessAccount(provider, accountId) {
+    return this.request('GET', `/managedAccess/providers/${encodeURIComponent(provider)}/accounts`, {
+      query: { accountId },
+    });
+  }
+
+  revokeManagedAccess(provider, identifier) {
+    return this.request('DELETE', `/managedAccess/providers/${encodeURIComponent(provider)}/credentials`, {
+      query: { identifier },
+    });
+  }
+
   getOffers({ countryCode, domain, campaignType = 'rsoc' } = {}) {
     return this.request('GET', '/offers', { query: { campaignType, countryCode, domain } });
   }

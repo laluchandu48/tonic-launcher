@@ -14,6 +14,7 @@ import FbSettings from './pages/FbSettings.jsx';
 import Settings from './pages/Settings.jsx';
 import Login from './pages/Login.jsx';
 import Account from './pages/Account.jsx';
+import TonicAccount from './pages/TonicAccount.jsx';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="/final-data" element={<FinalData />} />
         <Route path="/final-data/adsets/:id" element={<AdsetHistory />} />
         <Route path="/fb-settings" element={<FbSettings />} />
+        <Route path="/tonic-account" element={<TonicAccount />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
         <Route path="*" element={<Navigate to="/" replace />} />

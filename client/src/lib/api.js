@@ -175,6 +175,30 @@ export const api = {
     clear: () => request('/fb-settings', { method: 'DELETE' }),
   },
 
+  tonicAccount: {
+    get: () => request('/tonic-account'),
+    patch: (body) => request('/tonic-account', { method: 'PATCH', body }),
+
+    apiCredentials: () => request('/tonic-account/api-credentials'),
+    /* Fetched only when someone asks to see a secret, never with the list. */
+    revealCredential: (id) =>
+      request(`/tonic-account/api-credentials/${encodeURIComponent(id)}/reveal`),
+    createCredential: (body) =>
+      request('/tonic-account/api-credentials', { method: 'POST', body }),
+    deleteCredential: (id) =>
+      request(`/tonic-account/api-credentials/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+    managedAccess: (provider) =>
+      request(`/tonic-account/managed-access/${encodeURIComponent(provider)}`),
+    checkAccounts: (provider, accountIds) =>
+      request(`/tonic-account/managed-access/${encodeURIComponent(provider)}/check`, {
+        method: 'POST', body: { accountIds },
+      }),
+    revokeAccess: (provider, identifier) =>
+      request(`/tonic-account/managed-access/${encodeURIComponent(provider)}/credentials`
+        + `?identifier=${encodeURIComponent(identifier)}`, { method: 'DELETE' }),
+  },
+
   keywords: {
     /* Empty filters are dropped rather than sent: v4 treats an empty value as
        a filter that matches nothing. */

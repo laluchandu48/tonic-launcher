@@ -791,6 +791,107 @@ tr.detail-row:hover > td { background: var(--surface-2); }
   border-top: 1px solid var(--line);
 }
 
+/* ─── Profile menu ────────────────────────────────────────────────────────── */
+
+.profile { position: relative; }
+.profile-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 4px 4px 10px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.profile-button:hover { border-color: var(--line); background: var(--surface-2); }
+.profile-name { font-size: 13px; }
+@media (max-width: 860px) { .profile-name { display: none; } }
+
+.profile-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 260px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.22);
+}
+.profile-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.profile-head .muted { font-size: 11px; }
+
+.profile-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.profile-item:hover { background: var(--surface-2); }
+.profile-item .muted { font-size: 11px; }
+.profile-signout {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--bad-ink);
+}
+
+/* Tabs are links on Campaigns and buttons here; both need the same look. */
+button.tab {
+  font: inherit;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+/* ─── Label/value pairs ───────────────────────────────────────────────────── */
+
+.detail-list {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 8px 18px;
+  margin: 0;
+  font-size: 13px;
+}
+.detail-list dt { color: var(--ink-soft); }
+.detail-list dd { margin: 0; }
+
 /* ─── Ad-account multi-select ─────────────────────────────────────────────── */
 
 /* A grid rather than a long column: twenty accounts in one list means

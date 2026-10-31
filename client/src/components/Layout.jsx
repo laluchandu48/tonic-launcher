@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import ThemeToggle from './ThemeToggle.jsx';
+import ProfileMenu from './ProfileMenu.jsx';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: '▦', end: true },
@@ -7,10 +8,11 @@ const NAV = [
   { to: '/campaigns', label: 'Campaigns', icon: '◪' },
   { to: '/final-data', label: 'Final Data', icon: '⇄' },
   { to: '/compliance', label: 'Compliance', icon: '⛨' },
-  { to: '/fb-settings', label: 'FB Settings', icon: 'ƒ' },
-  { to: '/settings',  label: 'Settings',  icon: '⚙' },
-  { to: '/account',   label: 'Account',   icon: '◉' },
 ];
+
+/* Settings used to sit here beside Campaigns and Articles, which put "change
+   my password" at the same level as "today's spend". They are different kinds
+   of thing, so the sidebar is the work and the profile menu is the account. */
 
 export default function Layout({ title, tools, actions, children }) {
   return (
@@ -41,6 +43,7 @@ export default function Layout({ title, tools, actions, children }) {
             {tools}
             <ThemeToggle />
             {actions}
+            <ProfileMenu />
           </div>
         </header>
         <main className="content">{children}</main>
