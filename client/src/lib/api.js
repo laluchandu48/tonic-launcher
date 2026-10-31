@@ -144,6 +144,15 @@ export const api = {
       return request(`/final-data/adsets/${encodeURIComponent(adsetId)}/history?${q}`);
     },
 
+    /* One day of that adset, hour by hour. */
+    adsetHours: (adsetId, { date, account, param } = {}) => {
+      const q = new URLSearchParams();
+      if (date) q.set('date', date);
+      if (account) q.set('account', account);
+      if (param) q.set('param', param);
+      return request(`/final-data/adsets/${encodeURIComponent(adsetId)}/hours?${q}`);
+    },
+
     setAdsetStatus: (adsetId, active) =>
       request(`/final-data/adsets/${encodeURIComponent(adsetId)}/status`, {
         method: 'PUT',

@@ -27,6 +27,7 @@ import {
 } from '../lib/fbCredentials.js';
 import { normaliseAdAccountId, minorUnitsPerUnit } from '../lib/facebook.js';
 import { sessionDays } from '../db/index.js';
+import { fetchTonicHours, TONIC_TZ } from '../lib/hourly.js';
 
 const router = Router();
 
@@ -755,6 +756,139 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
 
   accountsSummary.set(key, { at: Date.now(), payload });
   res.json({ ...payload, cached: false, fetchedAt: new Date().toISOString() });
+}));
+
+/**
+ * One adset, one day, hour by hour.
+ *
+ * Both sides are asked for the same single day, but they count hours on
+ * different clocks: Meta aggregates in the ad account's timezone, Tonic
+ * timestamps on its own PST/PDT one. Meta's buckets are fixed, so Tonic's
+ * sessions are converted into the account's timezone and bucketed there, and
+ * the response names the timezone so the table can say which clock it is on.
+ */
+router.get('/adsets/:id/hours', requireCredentials, requireFbCredentials, asyncRoute(async (req, res) => {
+  const stored = readFbSettings();
+  const param = String(req.query.param || stored.joinParam).trim();
+  const adsetId = String(req.params.id);
+  const date = String(req.query.date || '');
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'Date must be YYYY-MM-DD.' });
+  }
+
+  const today = new Date();
+  const floor = rangeFloor(today);
+  if (date < floor) {
+    return res.status(400).json({ error: floorNote(floor) });
+  }
+  if (date > iso(today)) {
+    return res.status(400).json({ error: 'That day has not happened yet.' });
+  }
+
+  const accountId = normaliseAdAccountId(req.query.account) || stored.adAccountId;
+  const notes = [];
+
+  const account = await getFbClient().getAccountInfo(accountId)
+    .catch(() => ({ currency: 'USD', timezone: null }));
+
+  /* Without the account's timezone the two sides cannot be aligned honestly.
+     Falling back to Tonic's clock keeps the page working and says so, rather
+     than lining up hours that do not correspond. */
+  const timeZone = account.timezone || TONIC_TZ;
+  if (!account.timezone) {
+    notes.push(
+      'Facebook did not report this ad account\'s timezone, so the hours are shown on '
+      + "Tonic's clock (US Pacific). If the ad account runs on another timezone, spend and "
+      + 'revenue in a row may be an hour or more apart.'
+    );
+  }
+
+  const [fbHours, tonicSide] = await Promise.all([
+    getFbClient().getAdsetHourlyInsights({ adsetId, date }).catch((err) => {
+      notes.push(`Facebook returned no hourly data: ${err.message}`);
+      return [];
+    }),
+    fetchTonicHours({
+      client: getV4Client(),
+      date,
+      param,
+      adsetId,
+      timeZone,
+      pageSize: PAGE_SIZE,
+      maxPages: MAX_PAGES,
+    }).catch((err) => {
+      if (!/later than the maximum date/i.test(err?.message || '')) throw err;
+      notes.push(unreportedNote([date]));
+      return { hours: new Map(), sessions: 0, matched: 0, outsideDay: 0, truncated: false };
+    }),
+  ]);
+
+  const fbByHour = new Map(fbHours.map((h) => [h.hour, h]));
+
+  /* All twenty-four hours, always. A gap in the middle of a day is a fact
+     about the day, and a table that silently skips to the next hour with
+     spend hides it. */
+  const rows = Array.from({ length: 24 }, (_, hour) => {
+    const fb = fbByHour.get(hour) || { spend: 0, impressions: 0, clicks: 0, leads: 0 };
+    const t = tonicSide.hours.get(hour) || { sessions: 0, conversions: 0, revenue: 0 };
+    const revenue = Number(t.revenue) || 0;
+    const profit = revenue - fb.spend;
+
+    return {
+      hour,
+      label: `${String(hour).padStart(2, '0')}:00`,
+      spend: round(fb.spend),
+      revenue: round(revenue),
+      profit: round(profit),
+      roi: fb.spend > 0 ? round((profit / fb.spend) * 100, 1) : null,
+      cpl: t.conversions > 0 ? round(fb.spend / t.conversions, 3) : null,
+      rpc: t.conversions > 0 ? round(revenue / t.conversions, 3) : null,
+      leads: fb.leads,
+      conversions: t.conversions,
+      sessions: t.sessions,
+      impressions: fb.impressions,
+      clicks: fb.clicks,
+    };
+  });
+
+  const sum = (f) => rows.reduce((n, r) => n + (Number(r[f]) || 0), 0);
+  const spend = sum('spend');
+  const revenue = sum('revenue');
+  const conversions = sum('conversions');
+
+  if (tonicSide.outsideDay > 0) {
+    notes.push(
+      `${tonicSide.outsideDay} session${tonicSide.outsideDay === 1 ? '' : 's'} fell outside `
+      + `${date} once converted to ${timeZone}, so ${tonicSide.outsideDay === 1 ? 'it belongs' : 'they belong'} `
+      + 'to the neighbouring day and is not counted here.'
+    );
+  }
+  if (tonicSide.truncated) {
+    notes.push('This day had more sessions than one fetch covers; revenue may be low.');
+  }
+  notes.push('Hourly revenue is Tonic\'s running estimate and moves until the day is finalised.');
+
+  res.json({
+    date,
+    timeZone,
+    rows,
+    totals: {
+      spend: round(spend),
+      revenue: round(revenue),
+      profit: round(revenue - spend),
+      roi: spend > 0 ? round(((revenue - spend) / spend) * 100, 1) : null,
+      cpl: conversions > 0 ? round(spend / conversions, 3) : null,
+      rpc: conversions > 0 ? round(revenue / conversions, 3) : null,
+      leads: sum('leads'),
+      conversions,
+      sessions: sum('sessions'),
+      impressions: sum('impressions'),
+      clicks: sum('clicks'),
+    },
+    meta: { adsetId, param, accountId, currency: account.currency || 'USD' },
+    notes,
+  });
 }));
 
 export default router;

@@ -82,6 +82,12 @@ export default function AdsetHistory() {
   const [rangeKey, setRangeKey] = useState(params.get('range') || 'all');
   const [customFrom, setCustomFrom] = useState(params.get('from') || '');
   const [customTo, setCustomTo] = useState(params.get('to') || '');
+  /* The day picked for the hour-by-hour view, and its data. Separate from the
+     daily table: choosing a day should not reload the range above it. */
+  const [hourDate, setHourDate] = useState('');
+  const [hours, setHours] = useState(null);
+  const [hoursLoading, setHoursLoading] = useState(false);
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -126,6 +132,28 @@ export default function AdsetHistory() {
   }, [id, range]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadHours = useCallback(async (date) => {
+    setHourDate(date);
+    if (!date) { setHours(null); return; }
+    setHoursLoading(true);
+    try {
+      setHours(await api.finalData.adsetHours(id, {
+        date, account: params.get('account') || undefined,
+      }));
+    } catch (err) {
+      toast.error(err.message);
+      setHours(null);
+    } finally {
+      setHoursLoading(false);
+    }
+  }, [id]);
+
+  /* The range moved, so a day chosen from the old one may no longer be in it. */
+  useEffect(() => {
+    if (!hourDate || !data?.rows) return;
+    if (!data.rows.some((r) => r.date === hourDate)) { setHourDate(''); setHours(null); }
+  }, [data]);
 
   // The tab's title is how you tell several of these apart.
   useEffect(() => {
@@ -249,6 +277,105 @@ export default function AdsetHistory() {
                 </tfoot>
               )}
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── One day, hour by hour ── */}
+      <div className="card">
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <h2>Hour by hour</h2>
+          <div className="toolbar">
+            <select
+              value={hourDate}
+              onChange={(e) => loadHours(e.target.value)}
+              style={{ width: 'auto', minWidth: 170 }}
+              aria-label="Day to break down by hour"
+              disabled={!data?.rows?.length}
+            >
+              <option value="">Pick a day…</option>
+              {/* Newest first: the day you want to look into is usually today. */}
+              {[...(data?.rows || [])].reverse().map((r) => (
+                <option key={r.date} value={r.date}>{r.date}</option>
+              ))}
+            </select>
+            {hourDate && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => loadHours(hourDate)}
+                disabled={hoursLoading}
+              >
+                {hoursLoading && <span className="spinner" />}
+                {hoursLoading ? 'Loading…' : 'Refresh'}
+              </button>
+            )}
+          </div>
+          {hours?.timeZone && (
+            <div className="muted" style={{ fontSize: 12 }}>
+              hours shown in {hours.timeZone}
+            </div>
+          )}
+        </div>
+
+        {!hourDate ? (
+          <div className="empty">
+            <p>Pick a day above to see it hour by hour.</p>
+          </div>
+        ) : hoursLoading ? (
+          <div className="empty">Loading…</div>
+        ) : !hours ? (
+          <div className="empty">
+            <p>No hourly data for {hourDate}.</p>
+          </div>
+        ) : (
+          <div className="table-scroll" style={{ '--table-min': '1000px' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Hour</th>
+                  {COLUMNS.filter((c) => c.key !== 'date').map((c) => (
+                    <th key={c.key} className="num" title={c.title}>{c.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {hours.rows.map((r) => (
+                  <tr key={r.hour}>
+                    <td className="mono">{r.label}</td>
+                    {COLUMNS.filter((c) => c.key !== 'date').map((c) => (
+                      <td key={c.key} className={`num ${c.tone ? tone(r[c.key]) : ''}`}>
+                        {cell(c, r)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              {hours.totals && (
+                <tfoot>
+                  <tr className="summary-row">
+                    <td className="label">Total</td>
+                    <td className="num">{money(hours.totals.spend)}</td>
+                    <td className="num">{money(hours.totals.revenue)}</td>
+                    <td className={`num ${tone(hours.totals.profit)}`}>{money(hours.totals.profit)}</td>
+                    <td className={`num ${tone(hours.totals.roi)}`}>
+                      {hours.totals.roi == null ? dash : `${hours.totals.roi} %`}
+                    </td>
+                    <td className="num">{hours.totals.cpl == null ? dash : money(hours.totals.cpl)}</td>
+                    <td className="num">{hours.totals.rpc == null ? dash : money(hours.totals.rpc)}</td>
+                    <td className="num">{int(hours.totals.leads)}</td>
+                    <td className="num">{int(hours.totals.conversions)}</td>
+                    <td className="num">{int(hours.totals.impressions)}</td>
+                    <td className="num">{int(hours.totals.clicks)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+
+        {(hours?.notes || []).length > 0 && (
+          <div className="footnotes">
+            {hours.notes.map((n, i) => <p className="note" key={i}>{n}</p>)}
           </div>
         )}
       </div>

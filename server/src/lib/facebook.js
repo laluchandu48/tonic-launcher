@@ -245,12 +245,15 @@ export class FacebookClient {
     const cached = this._accountCache.get(account);
     if (cached) return cached;
 
-    const data = await this.request(`/${account}`, { fields: 'name,currency' });
+    const data = await this.request(`/${account}`, { fields: 'name,currency,timezone_name' });
     const info = {
       id: account,
       name: data?.name || null,
       currency: data?.currency || 'USD',
       minorUnits: minorUnitsPerUnit(data?.currency),
+      /* Meta buckets its hourly breakdown in this timezone, so anything joined
+         to those buckets has to be converted into it. */
+      timezone: data?.timezone_name || null,
     };
     // A currency does not change. Caching it removes one call per page load.
     this._accountCache.set(account, info);
@@ -419,6 +422,56 @@ export class FacebookClient {
    * the request small and avoids Meta's filtering syntax. `time_increment=1`
    * is what turns one total into one row per day.
    */
+  /**
+   * One adset, one day, broken down by hour.
+   *
+   * Meta aggregates the hours in the AD ACCOUNT's timezone and returns each as
+   * a label like "13:00:00 - 13:59:59". Those buckets are fixed on their side,
+   * so anything joined to them has to be converted into that timezone rather
+   * than the other way round — which is why the account's timezone is part of
+   * the result instead of being assumed.
+   */
+  async getAdsetHourlyInsights({ adsetId, date }) {
+    const id = String(adsetId || '').trim();
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) {
+      throw new FacebookError('Not a valid adset ID.', { status: 400 });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+      throw new FacebookError('Date must be YYYY-MM-DD.', { status: 400 });
+    }
+
+    const byHour = new Map();
+    let body = await this.request(`/${id}/insights`, {
+      fields: 'spend,impressions,clicks,actions',
+      time_range: { since: date, until: date },
+      breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
+      limit: 200,
+    });
+
+    let pages = 0;
+    while (body && pages < MAX_PAGES) {
+      for (const r of body.data || []) {
+        // "13:00:00 - 13:59:59" -> 13
+        const label = String(r.hourly_stats_aggregated_by_advertiser_time_zone || '');
+        const hour = Number(label.slice(0, 2));
+        if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+
+        const acc = byHour.get(hour) || { hour, spend: 0, impressions: 0, clicks: 0, leads: 0 };
+        acc.spend += Number(r.spend) || 0;
+        acc.impressions += Number(r.impressions) || 0;
+        acc.clicks += Number(r.clicks) || 0;
+        acc.leads += leadsFrom(r.actions);
+        byHour.set(hour, acc);
+      }
+      pages += 1;
+      const next = body.paging?.next;
+      if (!next) break;
+      body = await this.requestUrl(new URL(next), '/insights');
+    }
+
+    return [...byHour.values()].sort((a, b) => a.hour - b.hour);
+  }
+
   async getAdsetDailyInsights({ adsetId, since, until }) {
     const id = String(adsetId || '').trim();
     if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) {
