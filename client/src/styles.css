@@ -1,21 +1,22 @@
-/* Blue on near-black, taken from the dashboard screenshot: #0f1115 page,
-   #171a21 surfaces, #2a2f38 lines, blue for anything you can press. The
-   light theme keeps its own chrome and borrows the same blue, so the two
-   are recognisably one app.
+/* Teal on near-black: #0f1115 page, #171a21 surfaces, #2a2f38 lines, and
+   the app's own teal for anything you can press.
 
-   Two blues, because one cannot do both jobs. --accent fills a button and
+   Two teals, because one cannot do both jobs. --accent fills a button and
    carries white text, so it has to be deep enough to read against white.
-   --accent-text is the brighter screenshot blue, used where the colour IS
-   the text or the mark: links, sort arrows, chart bars. Swapping them makes
-   either the buttons or the links unreadable. */
+   --accent-text is the brighter teal, used where the colour IS the text or
+   the mark: links, sort arrows, chart bars. Swapping them makes either the
+   buttons or the links unreadable.
+
+   Profit and ROI are red below zero and green above, everywhere they
+   appear, because those two numbers are the ones people act on. */
 :root {
   --chrome:        #0c3547;
   --chrome-deep:   #082735;
   --chrome-line:   #1b4b5e;
-  --accent:        #2a56bb;
-  --accent-hover:  #1f4eb0;
+  --accent:        #0f7b8a;
+  --accent-hover:  #0c6674;
   --accent-ink:    #ffffff;   /* text on an accent-filled control */
-  --accent-text:   #2a56bb;   /* the accent as text or a mark */
+  --accent-text:   #0f7b8a;   /* the accent as text or a mark */
   --ink:           #16232b;
   --ink-soft:      #5c7280;
   --line:          #dfe6ea;
@@ -34,7 +35,7 @@
   --chip-on:       #d6f0e4;
   --chip-on-line:  #aedcc6;
   --chip-on-ink:   #14603a;
-  --focus-ring:    rgba(42, 86, 187, 0.16);
+  --focus-ring:    rgba(15, 123, 138, 0.16);
   --radius:        8px;
   --sidebar-w:     220px;
 }
@@ -48,10 +49,10 @@
   --chrome:        #171a21;
   --chrome-deep:   #0f1115;
   --chrome-line:   #2a2f38;
-  --accent:        #3b6ad0;
-  --accent-hover:  #4a7adf;
+  --accent:        #157f8c;
+  --accent-hover:  #1f98a8;
   --accent-ink:    #ffffff;
-  --accent-text:   #6ea2ff;   /* the screenshot's own blue, for text and marks */
+  --accent-text:   #2b9dac;   /* the teal from the reference, for text and marks */
   --ink:           #e6e8eb;
   --ink-soft:      #9aa3ae;
   --line:          #2a2f38;
@@ -64,13 +65,13 @@
   --ok-ink:        #5fd79a;
   --warn:          #2a1d10;
   --warn-ink:      #e0b457;
-  --bad:           #331a12;
-  --bad-ink:       #fb923c;
+  --bad:           #3a1c1c;
+  --bad-ink:       #f08c8c;   /* losses read red, not orange */
   --pos-ink:       #5fd79a;
   --chip-on:       #14301f;
   --chip-on-line:  #276b47;
   --chip-on-ink:   #5fd79a;
-  --focus-ring:    rgba(59, 106, 208, 0.3);
+  --focus-ring:    rgba(43, 157, 172, 0.28);
 }
 
 * { box-sizing: border-box; }
