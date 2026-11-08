@@ -32,7 +32,7 @@ import { fetchTonicHours, TONIC_TZ } from '../lib/hourly.js';
 const router = Router();
 
 /**
- * A viewer sees only the ad accounts assigned to them.
+ * A non-admin sees only the ad accounts assigned to them.
  *
  * Enforced on every route of this router rather than in each handler: the ad
  * account arrives as a query parameter, so "don't show them the picker" is
@@ -42,7 +42,10 @@ const router = Router();
  * different account.
  */
 router.use((req, res, next) => {
-  if (req.user?.role !== 'viewer') return next();
+  /* Anyone who is not an admin — a viewer or an editor — is held to their
+     assignment. Testing for "not admin" rather than naming the roles means a
+     role added later is scoped by default instead of unscoped. */
+  if (!req.user || req.user.role === 'admin') return next();
 
   const allowed = (req.user.adAccounts || []).map(normaliseAdAccountId).filter(Boolean);
   if (!allowed.length) {
@@ -506,6 +509,31 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
 }));
 
 /**
+ * Refuse a write against an object outside the caller's assignment.
+ *
+ * An adset ID is all the Graph API needs, so scoping the report alone would
+ * leave an editor able to pause any adset whose ID they happen to know. One
+ * extra Facebook call on a write is worth that. An admin is not restricted,
+ * and the call is skipped for them.
+ */
+async function denyForeignObject(req, objectId) {
+  const allowed = req.allowedAccounts;
+  if (!allowed) return null;
+  let owner;
+  try {
+    owner = await getFbClient().getOwningAccount(objectId);
+  } catch {
+    /* If Facebook will not say who owns it, the change does not happen. The
+       safe answer to "I cannot tell" is no. */
+    return 'That change could not be checked against your ad accounts.';
+  }
+  if (!owner || !allowed.includes(owner)) {
+    return 'That adset is not in one of your ad accounts.';
+  }
+  return null;
+}
+
+/**
  * Change an adset's daily budget. This is the only endpoint in the app that
  * writes to an ad platform, so it is deliberately narrow: one adset, one field,
  * a positive number, and nothing else.
@@ -516,6 +544,16 @@ router.put('/budget/:id', requireFbCredentials, asyncRoute(async (req, res) => {
     return res.status(400).json({
       error: 'Enter a daily budget greater than zero.',
       fields: { dailyBudget: 'Enter an amount greater than zero.' },
+    });
+  }
+
+  /* The budget may sit on the campaign rather than the adset, so :id is
+     whichever object holds it — and either way it must be one of theirs. */
+  const denied = await denyForeignObject(req, req.params.id);
+  if (denied) {
+    return res.status(403).json({
+      error: denied.replace('That adset', 'That budget'),
+      code: 'FORBIDDEN',
     });
   }
 
@@ -660,6 +698,9 @@ router.put('/adsets/:id/status', requireFbCredentials, asyncRoute(async (req, re
   if (typeof active !== 'boolean') {
     return res.status(400).json({ error: 'Send active: true or false.' });
   }
+  const denied = await denyForeignObject(req, req.params.id);
+  if (denied) return res.status(403).json({ error: denied, code: 'FORBIDDEN' });
+
   const result = await getFbClient().setAdsetStatus(req.params.id, active);
   res.json({ ok: true, adsetId: result.id, status: result.status });
 }));

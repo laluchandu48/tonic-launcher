@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useSession } from '../components/SessionContext.jsx';
 import Layout from '../components/Layout.jsx';
 import SearchBox from '../components/SearchBox.jsx';
 import Switch from '../components/Switch.jsx';
@@ -114,6 +115,10 @@ export default function FinalData() {
   /* True when this account only sees the ad accounts assigned to it, which
      changes what an empty list means. */
   const [restricted, setRestricted] = useState(false);
+  /* Being scoped to a few ad accounts and being read-only are different
+     things: an editor is scoped but may still change a budget. */
+  const session = useSession();
+  const canEdit = session?.role !== 'viewer';
 
   // Which budget cell is open for editing, and what is typed in it.
   const [editingBudget, setEditingBudget] = useState(null);
@@ -229,8 +234,8 @@ export default function FinalData() {
   };
 
   const openBudget = (row) => {
-    // A restricted account is read-only, so the cell is not a button for them.
-    if (restricted) return;
+    // Read-only accounts get the number, not a control.
+    if (!canEdit) return;
     // Lifetime budgets are not editable here; Meta needs a different field and
     // changing one mid-flight has consequences this screen can't explain well.
     if (row.budget == null || row.budgetType !== 'daily') return;
@@ -345,7 +350,7 @@ export default function FinalData() {
         style={{ width: 90, textAlign: 'right', padding: '4px 6px' }}
         aria-label={`Daily budget for ${r.adsetName || r.adsetId}`}
       />
-    ) : r.budget != null && r.budgetType === 'daily' ? (
+    ) : r.budget != null && r.budgetType === 'daily' && canEdit ? (
       <button
         className="btn btn-ghost"
         style={{ padding: '2px 6px' }}
@@ -375,8 +380,11 @@ export default function FinalData() {
           <Switch
             checked={String(r.status || '').toUpperCase() === 'ACTIVE'}
             busy={togglingAdset === r.adsetId}
+            disabled={!canEdit}
             onChange={(v) => toggleAdset(r, v)}
-            label={`${r.adsetName || r.adsetId} — ${statusLabel(r.status)}`}
+            label={canEdit
+              ? `${r.adsetName || r.adsetId} — ${statusLabel(r.status)}`
+              : `${r.adsetName || r.adsetId} — ${statusLabel(r.status)} (read-only)`}
           />
         );
       case 'adsetName':

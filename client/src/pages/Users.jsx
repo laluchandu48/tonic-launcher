@@ -2,13 +2,29 @@ import { useCallback, useEffect, useState } from 'react';
 import Layout from '../components/Layout.jsx';
 import { useToast } from '../components/Toast.jsx';
 import { api } from '../lib/api.js';
+import { useSession } from '../components/SessionContext.jsx';
+
+/**
+ * The three levels, in the order they are offered: least access first, so
+ * the safe choice is the one already selected.
+ */
+const LEVELS = [
+  { value: 'viewer', label: 'Read-only',
+    hint: 'Sees Final Data for the ad accounts you assign. Changes nothing.' },
+  { value: 'editor', label: 'Can edit budgets and pause adsets',
+    hint: 'The same screen, plus the budget and on/off controls — on their own ad accounts only.' },
+  { value: 'admin', label: 'Admin',
+    hint: 'Everything you can do, including the Tonic and Facebook credentials. All ad accounts.' },
+];
+const levelLabel = (role) => LEVELS.find((l) => l.value === role)?.label || role;
 
 /**
  * Who can sign in, and what they can see.
  *
- * A viewer gets Final Data for the ad accounts ticked here and nothing else —
- * no settings, no API credentials, and no way to change a budget or pause an
- * adset. The restriction lives on the server; this screen only sets it.
+ * Three levels. Read-only and "can edit" both get Final Data for the ad
+ * accounts ticked here and nothing else — no settings, no API credentials —
+ * and differ only in whether the budget and on/off controls work. An admin
+ * gets everything. The restriction lives on the server; this screen sets it.
  *
  * There is no mail server behind this app, so a new user's password appears
  * here once and you pass it on yourself. It is not recoverable afterwards:
@@ -16,6 +32,7 @@ import { api } from '../lib/api.js';
  */
 export default function Users() {
   const toast = useToast();
+  const me = useSession();
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +40,7 @@ export default function Users() {
 
   const [adding, setAdding] = useState(false);
   const [email, setEmail] = useState('');
+  const [role, setRole] = useState('viewer');
   const [picked, setPicked] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
@@ -65,10 +83,11 @@ export default function Users() {
     setSaving(true);
     setErrors({});
     try {
-      const res = await api.users.create({ email, adAccounts: [...picked] });
+      const res = await api.users.create({ email, role, adAccounts: [...picked] });
       setIssued({ email: res.user.email, password: res.temporaryPassword, isNew: true });
       setAdding(false);
       setEmail('');
+      setRole('viewer');
       setPicked(new Set());
       load();
     } catch (err) {
@@ -87,6 +106,17 @@ export default function Users() {
       load();
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  const setLevel = async (user, next) => {
+    try {
+      await api.users.update(user.id, { role: next });
+      toast.success(`${user.email || user.username} is now ${levelLabel(next).toLowerCase()}.`);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+      load();   // put the dropdown back to what the server still says
     }
   };
 
@@ -198,6 +228,14 @@ export default function Users() {
             </div>
 
             <div className="field">
+              <label htmlFor="level">Access</label>
+              <select id="level" value={role} onChange={(e) => setRole(e.target.value)}>
+                {LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+              </select>
+              <p className="hint">{LEVELS.find((l) => l.value === role)?.hint}</p>
+            </div>
+
+            <div className="field" style={{ display: role === 'admin' ? 'none' : undefined }}>
               <label>Ad accounts they can see</label>
               <AccountPicker set={picked} onToggle={toggle(picked, setPicked)} />
               <p className="hint">
@@ -254,9 +292,22 @@ export default function Users() {
                       )}
                     </td>
                     <td>
-                      <span className={`badge ${u.role === 'admin' ? 'badge-ok' : 'badge-idle'}`}>
-                        {u.role}
-                      </span>
+                      {u.id === me?.id ? (
+                        /* Your own level is not yours to lower — the server
+                           refuses it, and a dropdown that always errors is
+                           worse than no dropdown. */
+                        <span className="badge badge-ok" title="Your own account">{u.role}</span>
+                      ) : (
+                        <select
+                          value={u.role}
+                          onChange={(e) => setLevel(u, e.target.value)}
+                          aria-label={`Access for ${u.email || u.username}`}
+                        >
+                          {LEVELS.map((l) => (
+                            <option key={l.value} value={l.value}>{l.label}</option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td>
                       {u.role === 'admin' ? (
@@ -280,7 +331,7 @@ export default function Users() {
                     </td>
                     <td>
                       <div className="toolbar">
-                        {u.role === 'viewer' && (
+                        {u.role !== 'admin' && (
                           <button
                             className="btn btn-ghost"
                             onClick={() => { setEditing(u); setEditPicked(new Set(u.adAccounts)); }}
@@ -323,9 +374,10 @@ export default function Users() {
 
       <div className="footnotes">
         <p className="note">
-          A viewer sees Final Data for the accounts ticked above and nothing else — no settings,
-          no API credentials, and no way to change a budget or pause an adset. Suspending someone
-          ends their session immediately.
+          Read-only and "can edit" both see Final Data for the accounts assigned to them and
+          nothing else — no settings and no API credentials. "Can edit" adds the budget and
+          on/off controls, and only for adsets in their own ad accounts. Suspending someone ends
+          their session immediately.
         </p>
       </div>
     </Layout>

@@ -65,9 +65,11 @@ export default function App() {
     );
   }
 
-  /* A viewer has one screen. The server refuses the rest regardless; this
-     keeps the app from offering doors that only lead to an error. */
-  if (user.role === 'viewer') {
+  /* A viewer and an editor both have one screen — the difference is what
+     they may change on it, not what they can open. The server refuses the
+     rest regardless; this keeps the app from offering doors that only lead
+     to an error. */
+  if (user.role === 'viewer' || user.role === 'editor') {
     return (
       <SessionProvider value={user}>
         <ToastProvider>

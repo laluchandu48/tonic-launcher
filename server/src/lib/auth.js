@@ -158,11 +158,11 @@ export function requireAdmin(req, res, next) {
 }
 
 /**
- * A viewer may reach Final Data and their own account, and nothing else.
+ * A non-admin may reach Final Data and their own account, and nothing else.
  *
  * An allowlist rather than a blocklist: a route added next month is closed to
- * viewers until someone decides otherwise, which is the right default when
- * what sits behind these routes is the API credentials.
+ * them until someone decides otherwise, which is the right default when what
+ * sits behind these routes is the API credentials.
  */
 const VIEWER_PATHS = [
   /^\/auth(\/|$)/,
@@ -170,20 +170,38 @@ const VIEWER_PATHS = [
   /^\/stats\/today$/,
 ];
 
+/**
+ * What an editor may change: the budget and on/off controls on Final Data,
+ * and nothing else. Spending money is the whole of the extra trust, so it is
+ * written out rather than inferred from "not a viewer".
+ */
+const EDITOR_WRITES = [
+  /^\/final-data\/budget\//,
+  /^\/final-data\/adsets\/[^/]+\/status$/,
+];
+
 export function restrictViewers(req, res, next) {
-  if (req.user?.role !== 'viewer') return next();
+  const role = req.user?.role;
+  if (role !== 'viewer' && role !== 'editor') return next();
 
   const path = req.path;
   if (!VIEWER_PATHS.some((rx) => rx.test(path))) {
     return res.status(403).json({ error: 'Not available on this account.', code: 'FORBIDDEN' });
   }
-  /* Read-only: the budget and on/off controls are writes, and an account that
-     is not trusted with the credentials should not be able to spend money.
-     Sign-out and password change are the exceptions, hence the /auth test. */
-  if (req.method !== 'GET' && !/^\/auth(\/|$)/.test(path)) {
-    return res.status(403).json({ error: 'This account has read-only access.', code: 'READ_ONLY' });
-  }
-  next();
+
+  if (req.method === 'GET' || /^\/auth(\/|$)/.test(path)) return next();
+
+  /* Signing out and changing your own password are writes too, which is what
+     the /auth test above is for. Beyond those: an editor may change a budget
+     or pause an adset; a viewer may change nothing. */
+  if (role === 'editor' && EDITOR_WRITES.some((rx) => rx.test(path))) return next();
+
+  return res.status(403).json({
+    error: role === 'editor'
+      ? 'This account can change budgets and adset status, nothing else.'
+      : 'This account has read-only access.',
+    code: 'READ_ONLY',
+  });
 }
 
 // ─── First run ───────────────────────────────────────────────────────────────

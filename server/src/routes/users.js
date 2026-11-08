@@ -1,10 +1,11 @@
 /**
  * People who can sign in.
  *
- * An admin runs the place. A viewer sees Final Data for the ad accounts they
- * have been assigned and nothing else — no settings, no API credentials, no
- * writes. That separation is enforced in the auth layer, not here; this route
- * only decides who is which.
+ * An admin runs the place. An editor and a viewer both see Final Data for the
+ * ad accounts assigned to them and nothing else — no settings, no API
+ * credentials — and the difference between them is that an editor may change
+ * a budget and pause an adset. That separation is enforced in the auth layer,
+ * not here; this route only decides who is which.
  *
  * There is no mail server, so a new user's password is shown to the admin once
  * and passed on by hand. Saying so plainly beats a "we've emailed them" that
@@ -78,6 +79,22 @@ router.patch('/:id', asyncRoute(async (req, res) => {
 
   if (req.body?.adAccounts !== undefined) {
     users.setAdAccounts(user.id, cleanAccounts(req.body.adAccounts));
+  }
+
+  if (req.body?.role !== undefined) {
+    const role = String(req.body.role);
+    if (!ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Unknown access level.' });
+    }
+    /* The same two guards as suspending and deleting: the place must keep an
+       admin, and you cannot be the one to remove your own. */
+    if (role !== 'admin' && user.role === 'admin' && users.activeAdminCount() <= 1) {
+      return res.status(400).json({ error: 'This is the only active admin, so their access cannot be reduced.' });
+    }
+    if (role !== 'admin' && user.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot reduce your own access.' });
+    }
+    users.setRole(user.id, role);
   }
 
   if (req.body?.active !== undefined) {

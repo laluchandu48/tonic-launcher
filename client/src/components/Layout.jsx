@@ -20,7 +20,8 @@ export default function Layout({ title, tools, actions, children }) {
      first render — fetching it here made the admin menu appear and then
      collapse, flashing screens a viewer cannot open. */
   const user = useSession();
-  const nav = user?.role === 'viewer' ? NAV.filter((i) => i.to === '/final-data') : NAV;
+  const oneScreen = user?.role === 'viewer' || user?.role === 'editor';
+  const nav = oneScreen ? NAV.filter((i) => i.to === '/final-data') : NAV;
 
   return (
     <div className="shell">

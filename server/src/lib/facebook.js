@@ -506,6 +506,22 @@ export class FacebookClient {
   }
 
   /**
+   * Which ad account an adset (or a campaign) belongs to.
+   *
+   * One cheap call, used before letting a restricted account change something:
+   * an object ID is all the Graph API needs, so without this check anyone who
+   * knows an adset's ID could pause it, assigned the account or not.
+   */
+  async getOwningAccount(objectId) {
+    const id = String(objectId || '').trim();
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) {
+      throw new FacebookError('Not a valid object ID.', { status: 400 });
+    }
+    const body = await this.request(`/${id}`, { fields: 'account_id' });
+    return body?.account_id ? normaliseAdAccountId(body.account_id) : null;
+  }
+
+  /**
    * Turn an adset on or off. Only ACTIVE and PAUSED are offered: ARCHIVED and
    * DELETED are one-way doors and have no business behind a row toggle.
    */

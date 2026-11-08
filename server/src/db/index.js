@@ -386,7 +386,13 @@ for (const [column, definition] of [
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL');
 
 /** Roles: an admin runs the place; a viewer sees Final Data and nothing else. */
-export const ROLES = ['admin', 'viewer'];
+/**
+ * admin  — everything, the API credentials included.
+ * editor — Final Data for their assigned ad accounts, and may change budgets
+ *          and pause adsets there.
+ * viewer — the same screen, read-only.
+ */
+export const ROLES = ['admin', 'editor', 'viewer'];
 
 const parseAccounts = (raw) => {
   try {
@@ -440,6 +446,12 @@ export const users = {
   setAdAccounts(id, adAccounts) {
     db.prepare("UPDATE users SET ad_accounts = ?, updated_at = datetime('now') WHERE id = ?")
       .run(JSON.stringify(adAccounts || []), id);
+    return this.byId(id);
+  },
+
+  setRole(id, role) {
+    db.prepare("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(ROLES.includes(role) ? role : 'viewer', id);
     return this.byId(id);
   },
 
