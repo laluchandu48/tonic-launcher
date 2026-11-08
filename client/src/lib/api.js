@@ -113,6 +113,11 @@ export const api = {
       return request(`/final-data?${q}`);
     },
 
+    /* The accounts this user may look at — their assignment for a viewer,
+       everything the token sees for an admin. Lives here rather than under
+       fb-settings so a viewer can reach it. */
+    adAccounts: () => request('/final-data/ad-accounts'),
+
     /* Every ad account for one range. Expensive on Facebook's side, so the
        server caches it and `refresh` is what forces a new fetch. */
     accounts: ({ from, to, refresh, business, account } = {}) => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { useSession } from './SessionContext.jsx';
 
 /**
  * The signed-in user, top right, with everything about the account behind it.
@@ -24,12 +25,8 @@ const initialsOf = (name) => {
 export default function ProfileMenu() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [user, setUser] = useState(null);
+  const user = useSession();
   const ref = useRef(null);
-
-  useEffect(() => {
-    api.auth.me().then(({ user: u }) => setUser(u)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!open) return undefined;

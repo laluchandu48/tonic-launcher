@@ -100,6 +100,9 @@ export default function FinalData() {
   const [accountId, setAccountId] = useState('');
   const [accountFilter, setAccountFilter] = useState('');
   const [accountsLoading, setAccountsLoading] = useState(true);
+  /* True when this account only sees the ad accounts assigned to it, which
+     changes what an empty list means. */
+  const [restricted, setRestricted] = useState(false);
 
   // Which budget cell is open for editing, and what is typed in it.
   const [editingBudget, setEditingBudget] = useState(null);
@@ -120,9 +123,10 @@ export default function FinalData() {
   }, []);
 
   useEffect(() => {
-    api.fbSettings.accounts()
-      .then(({ accounts: list, selected }) => {
+    api.finalData.adAccounts()
+      .then(({ accounts: list, selected, restricted }) => {
         setAccounts(list);
+        setRestricted(Boolean(restricted));
         setAccountId(selected || list[0]?.id || '');
       })
       .catch((err) => {
@@ -169,7 +173,9 @@ export default function FinalData() {
   /** Remembered server-side, so the screen opens on the same account next time. */
   const chooseAccount = (id) => {
     setAccountId(id);
-    api.fbSettings.selectAccount(id).catch(() => {});
+    // Remembering the choice is a write, which a read-only account cannot do;
+    // the failure is ignored because the picker still works either way.
+    if (!restricted) api.fbSettings.selectAccount(id).catch(() => {});
   };
 
   const visibleAccounts = useMemo(() => {
@@ -514,12 +520,24 @@ export default function FinalData() {
           <div className="empty">Loading…</div>
         ) : accounts.length === 0 ? (
           <div className="empty">
-            <p>No ad accounts are reachable with the current Facebook token.</p>
-            <p className="hint">
-              Check the token on the <Link to="/fb-settings">FB Settings</Link> screen. If it
-              reports “API access blocked”, the Meta app behind the token needs the Marketing
-              API product added.
-            </p>
+            {restricted ? (
+              <>
+                <p>No ad accounts have been assigned to you yet.</p>
+                <p className="hint">
+                  Ask an administrator to assign the ad accounts you should see. Nothing is
+                  wrong with your sign-in.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>No ad accounts are reachable with the current Facebook token.</p>
+                <p className="hint">
+                  Check the token on the <Link to="/fb-settings">FB Settings</Link> screen. If it
+                  reports “API access blocked”, the Meta app behind the token needs the Marketing
+                  API product added.
+                </p>
+              </>
+            )}
           </div>
         ) : rows.length === 0 ? (
           <div className="empty">

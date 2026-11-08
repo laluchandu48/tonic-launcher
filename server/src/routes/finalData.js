@@ -924,4 +924,36 @@ router.get('/adsets/:id/hours', requireCredentials, requireFbCredentials, asyncR
   });
 }));
 
+/**
+ * The ad accounts the caller may actually look at.
+ *
+ * Final Data's own picker used to read /fb-settings/accounts, which is closed
+ * to viewers — so a viewer saw an empty picker and a message blaming the
+ * Facebook token for something that was really this app refusing the route.
+ * This lives under /final-data because that is the one place a viewer can
+ * reach, and it returns their assignment rather than everything the token
+ * can see.
+ */
+router.get('/ad-accounts', requireCredentials, requireFbCredentials, asyncRoute(async (req, res) => {
+  const all = await getFbClient().getAdAccounts();
+  const allowed = req.allowedAccounts;
+
+  const accounts = allowed ? all.filter((a) => allowed.includes(a.id)) : all;
+  const stored = readFbSettings();
+
+  /* A viewer's remembered account is meaningless if it is not one of theirs;
+     fall back to the first they do have. */
+  const selected = allowed
+    ? (allowed.includes(stored.adAccountId) ? stored.adAccountId : accounts[0]?.id || null)
+    : stored.adAccountId;
+
+  res.json({
+    accounts,
+    selected,
+    /* Says which case an empty list is, so the screen can stop blaming the
+       token for an assignment that was never made. */
+    restricted: Boolean(allowed),
+  });
+}));
+
 export default router;

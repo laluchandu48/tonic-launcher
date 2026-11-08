@@ -1,8 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import ThemeToggle from './ThemeToggle.jsx';
 import ProfileMenu from './ProfileMenu.jsx';
-import { useEffect, useState } from 'react';
-import { api } from '../lib/api.js';
+import { useSession } from './SessionContext.jsx';
 
 const NAV = [
   { to: '/',          label: 'Dashboard', icon: '▦', end: true },
@@ -17,13 +16,11 @@ const NAV = [
    of thing, so the sidebar is the work and the profile menu is the account. */
 
 export default function Layout({ title, tools, actions, children }) {
-  /* The sidebar is built from the signed-in role: a viewer reaches only Final
-     Data, so showing them the rest would be a menu of locked doors. */
-  const [role, setRole] = useState(null);
-  useEffect(() => {
-    api.auth.me().then(({ user }) => setRole(user?.role || null)).catch(() => {});
-  }, []);
-  const nav = role === 'viewer' ? NAV.filter((i) => i.to === '/final-data') : NAV;
+  /* The sidebar is built from the signed-in role, which is known before the
+     first render — fetching it here made the admin menu appear and then
+     collapse, flashing screens a viewer cannot open. */
+  const user = useSession();
+  const nav = user?.role === 'viewer' ? NAV.filter((i) => i.to === '/final-data') : NAV;
 
   return (
     <div className="shell">

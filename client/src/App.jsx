@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './components/Toast.jsx';
+import { SessionProvider } from './components/SessionContext.jsx';
 import { api } from './lib/api.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Articles from './pages/Articles.jsx';
@@ -54,11 +55,13 @@ export default function App() {
      but nobody should be using a password an admin can read off a screen. */
   if (user.mustChange) {
     return (
-      <ToastProvider>
-        <Routes>
-          <Route path="*" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
-        </Routes>
-      </ToastProvider>
+      <SessionProvider value={user}>
+        <ToastProvider>
+          <Routes>
+            <Route path="*" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+          </Routes>
+        </ToastProvider>
+      </SessionProvider>
     );
   }
 
@@ -66,21 +69,24 @@ export default function App() {
      keeps the app from offering doors that only lead to an error. */
   if (user.role === 'viewer') {
     return (
-      <ToastProvider>
-        <Routes>
-          <Route path="/final-data" element={<FinalData />} />
+      <SessionProvider value={user}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/final-data" element={<FinalData />} />
           <Route path="/final-data/adsets/:id" element={<AdsetHistory />} />
-          <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
-          <Route path="*" element={<Navigate to="/final-data" replace />} />
-        </Routes>
-      </ToastProvider>
+            <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+            <Route path="*" element={<Navigate to="/final-data" replace />} />
+          </Routes>
+        </ToastProvider>
+      </SessionProvider>
     );
   }
 
   return (
-    <ToastProvider>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
+    <SessionProvider value={user}>
+      <ToastProvider>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
         <Route path="/users" element={<Users />} />
         <Route path="/articles" element={<Articles />} />
         <Route path="/campaigns" element={<Campaigns />} />
@@ -93,8 +99,9 @@ export default function App() {
         <Route path="/tonic-account" element={<TonicAccount />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </ToastProvider>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ToastProvider>
+    </SessionProvider>
   );
 }
