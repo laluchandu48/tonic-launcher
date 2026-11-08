@@ -366,9 +366,101 @@ export const sessionDays = {
 
 // ─── Users ───────────────────────────────────────────────────────────────────
 
+/**
+ * Columns added to `users` after the first release.
+ *
+ * SQLite has no "ADD COLUMN IF NOT EXISTS", and an existing install already
+ * has the table, so each one is added only when the table does not have it.
+ * Defaults are chosen so that whoever was already using the app stays an
+ * admin: a silent demotion would lock them out of their own dashboard.
+ */
+for (const [column, definition] of [
+  ['email',       "TEXT"],
+  ['role',        "TEXT NOT NULL DEFAULT 'admin'"],
+  ['ad_accounts', "TEXT NOT NULL DEFAULT '[]'"],
+  ['active',      'INTEGER NOT NULL DEFAULT 1'],
+]) {
+  const present = db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === column);
+  if (!present) db.exec(`ALTER TABLE users ADD COLUMN ${column} ${definition}`);
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL');
+
+/** Roles: an admin runs the place; a viewer sees Final Data and nothing else. */
+export const ROLES = ['admin', 'viewer'];
+
+const parseAccounts = (raw) => {
+  try {
+    const list = JSON.parse(raw || '[]');
+    return Array.isArray(list) ? list.filter((v) => typeof v === 'string' && v) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** A user as the rest of the app sees them — never the hash or the salt. */
+export const presentUser = (u) => (u ? {
+  id: u.id,
+  username: u.username,
+  email: u.email || null,
+  role: u.role || 'admin',
+  adAccounts: parseAccounts(u.ad_accounts),
+  active: u.active === undefined ? true : Boolean(u.active),
+  mustChange: Boolean(u.must_change),
+  createdAt: u.created_at || null,
+} : null);
+
 export const users = {
   byUsername(username) {
     return db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').trim()) || null;
+  },
+
+  byEmail(email) {
+    return db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE')
+      .get(String(email || '').trim()) || null;
+  },
+
+  /** Sign-in accepts either, so a user added by email need not learn a username. */
+  byLogin(identifier) {
+    const text = String(identifier || '').trim();
+    if (!text) return null;
+    return this.byEmail(text) || this.byUsername(text);
+  },
+
+  list() {
+    return db.prepare('SELECT * FROM users ORDER BY role, LOWER(COALESCE(email, username))').all();
+  },
+
+  /** Admins who can still sign in — the set that must never reach zero. */
+  activeAdminCount() {
+    return db.prepare(
+      "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1"
+    ).get().n;
+  },
+
+  setAdAccounts(id, adAccounts) {
+    db.prepare("UPDATE users SET ad_accounts = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(JSON.stringify(adAccounts || []), id);
+    return this.byId(id);
+  },
+
+  setActive(id, active) {
+    db.prepare("UPDATE users SET active = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(active ? 1 : 0, id);
+    return this.byId(id);
+  },
+
+  /** Used when an admin resets someone's password for them. */
+  setTemporaryPassword(id, { passwordHash, salt }) {
+    db.prepare(`
+      UPDATE users
+         SET password_hash = ?, salt = ?, must_change = 1, updated_at = datetime('now')
+       WHERE id = ?
+    `).run(passwordHash, salt, id);
+    return this.byId(id);
+  },
+
+  remove(id) {
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
   },
 
   byId(id) {
@@ -379,11 +471,19 @@ export const users = {
     return db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
   },
 
-  create({ username, passwordHash, salt, mustChange = 1 }) {
+  create({ username, email = null, role = 'admin', adAccounts = [], passwordHash, salt, mustChange = 1 }) {
     const info = db.prepare(`
-      INSERT INTO users (username, password_hash, salt, must_change)
-      VALUES (?, ?, ?, ?)
-    `).run(String(username).trim(), passwordHash, salt, mustChange ? 1 : 0);
+      INSERT INTO users (username, email, role, ad_accounts, password_hash, salt, must_change)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(username).trim(),
+      email ? String(email).trim() : null,
+      ROLES.includes(role) ? role : 'viewer',
+      JSON.stringify(adAccounts || []),
+      passwordHash,
+      salt,
+      mustChange ? 1 : 0,
+    );
     return this.byId(info.lastInsertRowid);
   },
 

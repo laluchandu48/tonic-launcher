@@ -175,6 +175,15 @@ export const api = {
     clear: () => request('/fb-settings', { method: 'DELETE' }),
   },
 
+  users: {
+    list: () => request('/users'),
+    create: (body) => request('/users', { method: 'POST', body }),
+    update: (id, body) => request(`/users/${id}`, { method: 'PATCH', body }),
+    /* Returns a new temporary password, shown once and never stored readable. */
+    resetPassword: (id) => request(`/users/${id}/password`, { method: 'POST' }),
+    remove: (id) => request(`/users/${id}`, { method: 'DELETE' }),
+  },
+
   tonicAccount: {
     get: () => request('/tonic-account'),
     patch: (body) => request('/tonic-account', { method: 'PATCH', body }),

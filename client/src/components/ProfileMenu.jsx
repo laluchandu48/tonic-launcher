@@ -53,7 +53,11 @@ export default function ProfileMenu() {
     window.location.assign('/');
   };
 
-  const name = user?.username || '';
+  const name = user?.email || user?.username || '';
+  /* A viewer has no settings to reach, so the menu is just their password and
+     the way out. The server refuses those routes anyway; offering them would
+     only produce an error with extra steps. */
+  const isAdmin = user?.role !== 'viewer';
 
   return (
     <div className="profile" ref={ref}>
@@ -73,21 +77,31 @@ export default function ProfileMenu() {
         <div className="profile-menu" role="menu">
           <div className="profile-head">
             <strong>{name || 'Signed in'}</strong>
-            <span className="muted">Tonic Launcher</span>
+            <span className="muted">
+              {user?.role === 'viewer' ? 'Final Data access' : 'Tonic Launcher'}
+            </span>
           </div>
 
-          <button type="button" className="profile-item" onClick={() => go('/tonic-account')}>
-            Tonic account
-            <span className="muted">Account, network access, API credentials</span>
-          </button>
-          <button type="button" className="profile-item" onClick={() => go('/settings')}>
-            Launcher settings
-            <span className="muted">Tonic API credentials used by this app</span>
-          </button>
-          <button type="button" className="profile-item" onClick={() => go('/fb-settings')}>
-            FB settings
-            <span className="muted">Access token and dashboard ad accounts</span>
-          </button>
+          {isAdmin && (
+            <>
+              <button type="button" className="profile-item" onClick={() => go('/users')}>
+                Users
+                <span className="muted">Who can sign in, and what they can see</span>
+              </button>
+              <button type="button" className="profile-item" onClick={() => go('/tonic-account')}>
+                Tonic account
+                <span className="muted">Account, network access, API credentials</span>
+              </button>
+              <button type="button" className="profile-item" onClick={() => go('/settings')}>
+                Launcher settings
+                <span className="muted">Tonic API credentials used by this app</span>
+              </button>
+              <button type="button" className="profile-item" onClick={() => go('/fb-settings')}>
+                FB settings
+                <span className="muted">Access token and dashboard ad accounts</span>
+              </button>
+            </>
+          )}
           <button type="button" className="profile-item" onClick={() => go('/account')}>
             Change password
           </button>

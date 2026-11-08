@@ -31,6 +31,37 @@ import { fetchTonicHours, TONIC_TZ } from '../lib/hourly.js';
 
 const router = Router();
 
+/**
+ * A viewer sees only the ad accounts assigned to them.
+ *
+ * Enforced on every route of this router rather than in each handler: the ad
+ * account arrives as a query parameter, so "don't show them the picker" is
+ * not a control — anyone can type a different ID into the URL. With no
+ * account named, the first of theirs is used; with one named that is not
+ * theirs, the request is refused rather than quietly answered about a
+ * different account.
+ */
+router.use((req, res, next) => {
+  if (req.user?.role !== 'viewer') return next();
+
+  const allowed = (req.user.adAccounts || []).map(normaliseAdAccountId).filter(Boolean);
+  if (!allowed.length) {
+    return res.status(403).json({
+      error: 'No ad accounts have been assigned to this account yet.',
+      code: 'NO_ASSIGNED_ACCOUNTS',
+    });
+  }
+
+  const asked = normaliseAdAccountId(req.query.account);
+  if (asked && !allowed.includes(asked)) {
+    return res.status(403).json({ error: 'That ad account is not assigned to you.', code: 'FORBIDDEN' });
+  }
+
+  req.allowedAccounts = allowed;
+  req.query.account = asked || allowed[0];
+  next();
+});
+
 /** Tonic refuses a session report older than this. */
 const MAX_LOOKBACK_DAYS = 50;
 /** 1000 is Tonic's page cap; 40 pages is 40k sessions in one day. */
@@ -638,7 +669,9 @@ router.get('/accounts', requireCredentials, requireFbCredentials, asyncRoute(asy
      parameter — chosen once on FB Settings rather than re-picked on every
      visit. It is part of the cache key, so changing the selection shows the
      new answer instead of the previous one for the next ten minutes. */
-  const chosen = readDashboardAccounts();
+  /* A viewer's scope is their own assignment, never the dashboard selection
+     an admin saved — that list may well include accounts they cannot see. */
+  const chosen = req.allowedAccounts || readDashboardAccounts();
   const scope = chosen.length ? chosen.join(',') : 'all';
   const key = `${from}|${to}|${param}|${scope}`;
   const cached = accountsSummary.get(key);

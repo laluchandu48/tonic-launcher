@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { errorHandler } from './lib/http.js';
-import { requireAuth, ensureFirstUser } from './lib/auth.js';
+import { requireAuth, ensureFirstUser, restrictViewers } from './lib/auth.js';
 import authRoutes from './routes/auth.js';
 import settingsRoutes from './routes/settings.js';
 import lookupRoutes from './routes/lookups.js';
@@ -15,6 +15,7 @@ import campaignRoutes from './routes/campaigns.js';
 import statsRoutes from './routes/stats.js';
 import keywordRoutes from './routes/keywords.js';
 import tonicAccountRoutes from './routes/tonicAccount.js';
+import userRoutes from './routes/users.js';
 import complianceRoutes from './routes/compliance.js';
 import fbSettingsRoutes from './routes/fbSettings.js';
 import finalDataRoutes from './routes/finalData.js';
@@ -37,6 +38,11 @@ app.use('/api/auth', authRoutes);
 // default — the safer way round to forget something.
 app.use('/api', requireAuth);
 
+/* And immediately after it: a viewer account reaches Final Data and nothing
+   else. Placed here rather than on each router so a new route is closed to
+   viewers by default instead of open until someone remembers. */
+app.use('/api', restrictViewers);
+
 app.use('/api/settings', settingsRoutes);
 app.use('/api/lookups', lookupRoutes);
 app.use('/api/articles', articleRoutes);
@@ -44,6 +50,7 @@ app.use('/api/campaigns', campaignRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/keywords', keywordRoutes);
 app.use('/api/tonic-account', tonicAccountRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/fb-settings', fbSettingsRoutes);
 app.use('/api/final-data', finalDataRoutes);

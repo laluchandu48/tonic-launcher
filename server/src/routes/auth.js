@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncRoute } from '../lib/http.js';
-import { users } from '../db/index.js';
+import { users, presentUser } from '../db/index.js';
 import {
   hashPassword, verifyPassword, setSessionCookie, clearSessionCookie,
   currentUser, requireAuth, MIN_PASSWORD_LENGTH,
@@ -15,25 +15,25 @@ router.get('/me', (req, res) => {
 });
 
 router.post('/login', asyncRoute(async (req, res) => {
-  const username = String(req.body?.username || '').trim();
+  // Users added by an admin know their email, not a username, so either works.
+  const identifier = String(req.body?.username || req.body?.email || '').trim();
   const password = String(req.body?.password || '');
 
-  const user = username ? users.byUsername(username) : null;
+  const user = identifier ? users.byLogin(identifier) : null;
   const ok = user ? await verifyPassword(password, user) : false;
 
-  // One message for a wrong name and a wrong password. Telling them apart
-  // confirms which usernames exist, which is free reconnaissance.
-  if (!ok) {
+  // One message for a wrong name, a wrong password and a suspended account.
+  // Telling them apart confirms which accounts exist, which is free
+  // reconnaissance — and a suspended user learning they are suspended from a
+  // login form is not how that should be found out.
+  if (!ok || user.active === 0) {
     // A deliberate pause blunts rapid guessing without a rate-limit table.
     await new Promise((r) => setTimeout(r, 400));
-    return res.status(401).json({ error: 'That username and password do not match.' });
+    return res.status(401).json({ error: 'Those details do not match an account.' });
   }
 
   setSessionCookie(res, user);
-  res.json({
-    ok: true,
-    user: { id: user.id, username: user.username, mustChange: Boolean(user.must_change) },
-  });
+  res.json({ ok: true, user: presentUser(user) });
 }));
 
 router.post('/logout', (req, res) => {

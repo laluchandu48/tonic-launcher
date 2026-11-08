@@ -15,7 +15,7 @@
  */
 import { randomBytes, scrypt as scryptCb, timingSafeEqual, createHmac } from 'node:crypto';
 import { promisify } from 'node:util';
-import { settings, users } from '../db/index.js';
+import { settings, users, presentUser } from '../db/index.js';
 
 const scrypt = promisify(scryptCb);
 
@@ -133,8 +133,10 @@ export function currentUser(req) {
   if (!user) return null;
   // The token was signed against a password that has since changed.
   if (claim.fp !== passwordFingerprint(user.password_hash)) return null;
+  // A suspended account keeps its cookie but stops being signed in.
+  if (user.active === 0) return null;
 
-  return { id: user.id, username: user.username, mustChange: Boolean(user.must_change) };
+  return presentUser(user);
 }
 
 /** Everything behind this needs a signed-in session. */
@@ -144,6 +146,43 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Sign in to continue.', code: 'AUTH_REQUIRED' });
   }
   req.user = user;
+  next();
+}
+
+/** Admin-only routes. Checked server-side: hiding a screen is not a guard. */
+export function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Admins only.', code: 'ADMIN_REQUIRED' });
+  }
+  next();
+}
+
+/**
+ * A viewer may reach Final Data and their own account, and nothing else.
+ *
+ * An allowlist rather than a blocklist: a route added next month is closed to
+ * viewers until someone decides otherwise, which is the right default when
+ * what sits behind these routes is the API credentials.
+ */
+const VIEWER_PATHS = [
+  /^\/auth(\/|$)/,
+  /^\/final-data(\/|$)/,
+  /^\/stats\/today$/,
+];
+
+export function restrictViewers(req, res, next) {
+  if (req.user?.role !== 'viewer') return next();
+
+  const path = req.path;
+  if (!VIEWER_PATHS.some((rx) => rx.test(path))) {
+    return res.status(403).json({ error: 'Not available on this account.', code: 'FORBIDDEN' });
+  }
+  /* Read-only: the budget and on/off controls are writes, and an account that
+     is not trusted with the credentials should not be able to spend money.
+     Sign-out and password change are the exceptions, hence the /auth test. */
+  if (req.method !== 'GET' && !/^\/auth(\/|$)/.test(path)) {
+    return res.status(403).json({ error: 'This account has read-only access.', code: 'READ_ONLY' });
+  }
   next();
 }
 
@@ -161,7 +200,8 @@ export async function ensureFirstUser() {
   const password = process.env.INITIAL_PASSWORD || randomBytes(12).toString('base64url');
 
   const { salt, passwordHash } = await hashPassword(password);
-  users.create({ username, passwordHash, salt, mustChange: 1 });
+  // The first account runs the place.
+  users.create({ username, role: 'admin', passwordHash, salt, mustChange: 1 });
 
   if (!process.env.INITIAL_PASSWORD) {
     console.log(`\n  Created the first account: ${username}`);

@@ -15,6 +15,7 @@ import Settings from './pages/Settings.jsx';
 import Login from './pages/Login.jsx';
 import Account from './pages/Account.jsx';
 import TonicAccount from './pages/TonicAccount.jsx';
+import Users from './pages/Users.jsx';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -48,10 +49,39 @@ export default function App() {
     );
   }
 
+  /* A first-time password has to be changed before anything else. Everything
+     routes to Account until it is — the server still enforces its own rules,
+     but nobody should be using a password an admin can read off a screen. */
+  if (user.mustChange) {
+    return (
+      <ToastProvider>
+        <Routes>
+          <Route path="*" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+        </Routes>
+      </ToastProvider>
+    );
+  }
+
+  /* A viewer has one screen. The server refuses the rest regardless; this
+     keeps the app from offering doors that only lead to an error. */
+  if (user.role === 'viewer') {
+    return (
+      <ToastProvider>
+        <Routes>
+          <Route path="/final-data" element={<FinalData />} />
+          <Route path="/final-data/adsets/:id" element={<AdsetHistory />} />
+          <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+          <Route path="*" element={<Navigate to="/final-data" replace />} />
+        </Routes>
+      </ToastProvider>
+    );
+  }
+
   return (
     <ToastProvider>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/users" element={<Users />} />
         <Route path="/articles" element={<Articles />} />
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/campaigns/keywords" element={<Keywords />} />
