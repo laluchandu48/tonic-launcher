@@ -66,7 +66,9 @@ router.use((req, res, next) => {
   }
 
   req.allowedAccounts = allowed;
-  req.query.account = asked || allowed[0];
+  /* No account named means all of theirs, which is what the screen opens on.
+     With one assigned account that is the same thing either way. */
+  req.query.account = asked || (allowed.length > 1 ? 'all' : allowed[0]);
   next();
 });
 
@@ -1039,10 +1041,12 @@ router.get('/ad-accounts', requireCredentials, requireFbCredentials, asyncRoute(
   const accounts = allowed ? all.filter((a) => allowed.includes(a.id)) : all;
   const stored = readFbSettings();
 
-  /* A viewer's remembered account is meaningless if it is not one of theirs;
-     fall back to the first they do have. */
+  /* Someone assigned several accounts wants all of them: looking at one at a
+     time is the special case, not the default. With a single account there is
+     nothing to combine, so that account is the selection. The remembered
+     account belongs to the admin and means nothing here. */
   const selected = allowed
-    ? (allowed.includes(stored.adAccountId) ? stored.adAccountId : accounts[0]?.id || null)
+    ? (accounts.length > 1 ? 'all' : accounts[0]?.id || null)
     : stored.adAccountId;
 
   res.json({
