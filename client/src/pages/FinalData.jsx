@@ -103,24 +103,6 @@ export default function FinalData() {
   const [onlyMatched, setOnlyMatched] = useState(false);
   const [sort, setSort] = useState({ key: 'spend', dir: 'desc' });
 
-  /* Which columns show and how wide they are, remembered in this browser. */
-  /* The Account column exists only while several accounts are being shown
-     together; otherwise every row would repeat the same value. */
-  const combined = Boolean(data?.meta?.combined);
-  /* A row's own currency, falling back to USD so nothing reads blank if the
-     server omits it. null (never here) is what prints an amount bare. */
-  const cur = (r) => r.currency || 'USD';
-  /* null when the combined accounts do not share a currency: the server says
-     so, and money() then leaves the suffix off rather than picking one. */
-  const totalCurrency = data?.meta?.currency === undefined ? 'USD' : data.meta.currency;
-  const columns = useMemo(
-    () => COLUMNS.filter((c) => !c.combinedOnly || combined),
-    [combined]
-  );
-
-  const { hidden, visible, widths, toggle, setWidth, reset, customised } =
-    useColumnPrefs('tonic.finalData.columns', columns);
-
   /* The unmatched list is a diagnostic, not part of the daily read, so it
      stays folded away until asked for. */
   const [showUnmatched, setShowUnmatched] = useState(false);
@@ -142,6 +124,27 @@ export default function FinalData() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [blocked, setBlocked] = useState(null); // 'tonic' | 'facebook'
+
+  /* Which columns show and how wide they are, remembered in this browser.
+     Declared after `data`, which it reads: a const is not hoisted, and
+     reading one above its declaration throws before anything renders. */
+  /* The Account column exists only while several accounts are being shown
+     together; otherwise every row would repeat the same value. */
+  const combined = Boolean(data?.meta?.combined);
+  /* A row's own currency, falling back to USD so nothing reads blank if the
+     server omits it. null (never here) is what prints an amount bare. */
+  const cur = (r) => r.currency || 'USD';
+  /* null when the combined accounts do not share a currency: the server says
+     so, and money() then leaves the suffix off rather than picking one. */
+  const totalCurrency = data?.meta?.currency === undefined ? 'USD' : data.meta.currency;
+  const columns = useMemo(
+    () => COLUMNS.filter((c) => !c.combinedOnly || combined),
+    [combined]
+  );
+
+  const { hidden, visible, widths, toggle, setWidth, reset, customised } =
+    useColumnPrefs('tonic.finalData.columns', columns);
+
 
   // Tonic's clock is PST/PDT; using the browser's date would ask for the wrong
   // day for anyone outside California.
@@ -351,14 +354,14 @@ export default function FinalData() {
           ? `Campaign budget for ${r.campaignName || 'this campaign'} — changing it affects every adset in it`
           : 'Click to change the daily budget'}
       >
-        {money(r.budget)}
+        {money(r.budget, cur(r))}
         {r.budgetLevel === 'campaign' && (
           <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>CBO</span>
         )}
       </button>
     ) : r.budget != null ? (
       <span className="muted" title="Lifetime budget — change it in Ads Manager">
-        {money(r.budget)} total
+        {money(r.budget, cur(r))} total
       </span>
     ) : (
       <span className="muted" title="No budget found on this adset or its campaign">—</span>
