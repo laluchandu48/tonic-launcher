@@ -1,17 +1,21 @@
-/* Amber on near-black, taken from the dashboard screenshot: #0f1115 page,
-   #171a21 surfaces, #2a2f38 lines, amber for anything you can press. The
-   light theme keeps its own chrome and borrows the same amber, so the two
+/* Blue on near-black, taken from the dashboard screenshot: #0f1115 page,
+   #171a21 surfaces, #2a2f38 lines, blue for anything you can press. The
+   light theme keeps its own chrome and borrows the same blue, so the two
    are recognisably one app.
 
-   Pressable amber carries dark text, not white: #f59e3c behind #ffffff is
-   about 2:1, which fails every contrast threshold there is. */
+   Two blues, because one cannot do both jobs. --accent fills a button and
+   carries white text, so it has to be deep enough to read against white.
+   --accent-text is the brighter screenshot blue, used where the colour IS
+   the text or the mark: links, sort arrows, chart bars. Swapping them makes
+   either the buttons or the links unreadable. */
 :root {
   --chrome:        #0c3547;
   --chrome-deep:   #082735;
   --chrome-line:   #1b4b5e;
-  --accent:        #b46a10;
-  --accent-hover:  #96570a;
+  --accent:        #2a56bb;
+  --accent-hover:  #1f4eb0;
   --accent-ink:    #ffffff;   /* text on an accent-filled control */
+  --accent-text:   #2a56bb;   /* the accent as text or a mark */
   --ink:           #16232b;
   --ink-soft:      #5c7280;
   --line:          #dfe6ea;
@@ -30,7 +34,7 @@
   --chip-on:       #d6f0e4;
   --chip-on-line:  #aedcc6;
   --chip-on-ink:   #14603a;
-  --focus-ring:    rgba(180, 106, 16, 0.16);
+  --focus-ring:    rgba(42, 86, 187, 0.16);
   --radius:        8px;
   --sidebar-w:     220px;
 }
@@ -44,9 +48,10 @@
   --chrome:        #171a21;
   --chrome-deep:   #0f1115;
   --chrome-line:   #2a2f38;
-  --accent:        #f59e3c;
-  --accent-hover:  #ffb05a;
-  --accent-ink:    #14161b;   /* amber is a light colour: dark text on it */
+  --accent:        #3b6ad0;
+  --accent-hover:  #4a7adf;
+  --accent-ink:    #ffffff;
+  --accent-text:   #6ea2ff;   /* the screenshot's own blue, for text and marks */
   --ink:           #e6e8eb;
   --ink-soft:      #9aa3ae;
   --line:          #2a2f38;
@@ -62,10 +67,10 @@
   --bad:           #331a12;
   --bad-ink:       #fb923c;
   --pos-ink:       #5fd79a;
-  --chip-on:       #33240f;
-  --chip-on-line:  #6b4a14;
-  --chip-on-ink:   #f2b765;
-  --focus-ring:    rgba(245, 158, 60, 0.22);
+  --chip-on:       #14301f;
+  --chip-on-line:  #276b47;
+  --chip-on-ink:   #5fd79a;
+  --focus-ring:    rgba(59, 106, 208, 0.3);
 }
 
 * { box-sizing: border-box; }
@@ -218,7 +223,7 @@ tbody tr:hover { background: var(--surface-2); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary { background: var(--surface); color: var(--ink); border-color: var(--line); }
 .btn-secondary:hover:not(:disabled) { background: var(--surface-2); }
-.btn-ghost { background: transparent; color: var(--accent); padding: 6px 8px; }
+.btn-ghost { background: transparent; color: var(--accent-text); padding: 6px 8px; }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-2); }
 .btn-danger { background: var(--surface); color: var(--bad-ink); border-color: var(--line); }
 
@@ -365,7 +370,7 @@ textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
 
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; }
 .muted { color: var(--ink-soft); }
-.link { color: var(--accent); text-decoration: none; word-break: break-all; }
+.link { color: var(--accent-text); text-decoration: none; word-break: break-all; }
 .link:hover { text-decoration: underline; }
 .toolbar { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
@@ -451,12 +456,12 @@ tr.summary-row td.label { text-align: right; color: var(--ink-soft); font-weight
   font: inherit;
   color: inherit;
 }
-.th-sort:hover { color: var(--accent); }
+.th-sort:hover { color: var(--accent-text); }
 th.num .th-sort { justify-content: flex-end; }
 
 /* The idle arrow stays faint so a sorted column is obvious at a glance. */
 .sort-arrow { font-size: 10px; opacity: 0.25; }
-.sort-arrow.on { opacity: 1; color: var(--accent); }
+.sort-arrow.on { opacity: 1; color: var(--accent-text); }
 
 /* Sign-in. Centred card on the app's own background, so it reads as the same
    product rather than a separate page bolted on. */
@@ -741,7 +746,7 @@ body.col-resizing * { cursor: col-resize !important; }
 /* ─── Disclosure header ───────────────────────────────────────────────────── */
 
 .card-head.disclosure { cursor: pointer; user-select: none; }
-.card-head.disclosure:hover h2 { color: var(--accent); }
+.card-head.disclosure:hover h2 { color: var(--accent-text); }
 .card-head.disclosure h2 { display: flex; align-items: center; }
 .disclosure-caret {
   display: inline-block;

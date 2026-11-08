@@ -12,7 +12,7 @@ import { useState } from 'react';
 
 /* Read from the stylesheet rather than written here, so the chart changes
    with the theme instead of staying light-blue on a near-black page. */
-const BAR = 'var(--accent)';
+const BAR = 'var(--accent-text)';
 const GRID = 'var(--line)';
 const AXIS_INK = 'var(--ink-soft)';
 const AXIS_LINE = 'var(--line)';
