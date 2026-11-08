@@ -1,11 +1,17 @@
-/* Visual language follows the Tonic publisher beta: deep teal chrome,
-   a white content card, and a right-hand drawer for create flows. */
+/* Amber on near-black, taken from the dashboard screenshot: #0f1115 page,
+   #171a21 surfaces, #2a2f38 lines, amber for anything you can press. The
+   light theme keeps its own chrome and borrows the same amber, so the two
+   are recognisably one app.
+
+   Pressable amber carries dark text, not white: #f59e3c behind #ffffff is
+   about 2:1, which fails every contrast threshold there is. */
 :root {
   --chrome:        #0c3547;
   --chrome-deep:   #082735;
   --chrome-line:   #1b4b5e;
-  --accent:        #0f7b8a;
-  --accent-hover:  #0c6674;
+  --accent:        #b46a10;
+  --accent-hover:  #96570a;
+  --accent-ink:    #ffffff;   /* text on an accent-filled control */
   --ink:           #16232b;
   --ink-soft:      #5c7280;
   --line:          #dfe6ea;
@@ -24,6 +30,7 @@
   --chip-on:       #d6f0e4;
   --chip-on-line:  #aedcc6;
   --chip-on-ink:   #14603a;
+  --focus-ring:    rgba(180, 106, 16, 0.16);
   --radius:        8px;
   --sidebar-w:     220px;
 }
@@ -34,36 +41,41 @@
  * by a snippet in index.html, so there is no flash of the wrong theme.
  */
 :root[data-theme="dark"] {
-  --chrome:        #0b1f29;
-  --chrome-deep:   #081821;
-  --chrome-line:   #17303c;
-  --accent:        #2b9dac;
-  --accent-hover:  #36b2c2;
-  --ink:           #e4ecf0;
-  --ink-soft:      #94aab6;
-  --line:          #22333c;
-  --surface:       #12242e;
-  --surface-2:     #162b36;
-  --row-total:     #162b36;
-  --line-soft:     #1b2a32;
-  --canvas:        #0d1d26;
-  --ok:            #10351f;
-  --ok-ink:        #6fe3a2;
-  --warn:          #3a2e14;
-  --warn-ink:      #e9c67f;
-  --bad:           #3a1c1c;
-  --bad-ink:       #f08c8c;
+  --chrome:        #171a21;
+  --chrome-deep:   #0f1115;
+  --chrome-line:   #2a2f38;
+  --accent:        #f59e3c;
+  --accent-hover:  #ffb05a;
+  --accent-ink:    #14161b;   /* amber is a light colour: dark text on it */
+  --ink:           #e6e8eb;
+  --ink-soft:      #9aa3ae;
+  --line:          #2a2f38;
+  --surface:       #171a21;
+  --surface-2:     #1c2028;
+  --row-total:     #1c2028;
+  --line-soft:     #22262e;
+  --canvas:        #0f1115;
+  --ok:            #14301f;
+  --ok-ink:        #5fd79a;
+  --warn:          #2a1d10;
+  --warn-ink:      #e0b457;
+  --bad:           #331a12;
+  --bad-ink:       #fb923c;
   --pos-ink:       #5fd79a;
-  --chip-on:       #11433a;
-  --chip-on-line:  #1d6b58;
-  --chip-on-ink:   #80e1be;
+  --chip-on:       #33240f;
+  --chip-on-line:  #6b4a14;
+  --chip-on-ink:   #f2b765;
+  --focus-ring:    rgba(245, 158, 60, 0.22);
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Inter's tabular figures: a column of numbers that shifts as it updates
+     is hard to read, and this table is mostly numbers. */
+  font-variant-numeric: tabular-nums;
   font-size: 14px;
   color: var(--ink);
   background: var(--chrome);
@@ -199,7 +211,7 @@ tbody tr:hover { background: var(--surface-2); }
   font-weight: 500;
   cursor: pointer;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   font-family: inherit;
 }
 .btn:hover:not(:disabled) { background: var(--accent-hover); }
@@ -236,7 +248,7 @@ input[type="email"], input:not([type]), select, textarea {
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(15, 123, 138, 0.12);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 input:disabled, select:disabled { background: var(--surface-2); color: var(--ink-soft); }
 textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
@@ -595,6 +607,7 @@ th.num .th-sort { justify-content: flex-end; }
   transition: transform 120ms ease;
 }
 .switch input:checked + .switch-track { background: var(--accent); }
+/* The knob is white on both themes; on amber that is the reading edge. */
 .switch input:checked + .switch-track .switch-knob { transform: translateX(15px); }
 .switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch input:disabled + .switch-track { opacity: 0.5; cursor: not-allowed; }

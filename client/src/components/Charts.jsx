@@ -10,9 +10,12 @@ import { useState } from 'react';
  * instead: separate plots, shared x axis, each on its own honest scale.
  */
 
-const BLUE = '#2a78d6';
-const GRID = '#e6ecef';
-const AXIS_INK = '#5c7280';
+/* Read from the stylesheet rather than written here, so the chart changes
+   with the theme instead of staying light-blue on a near-black page. */
+const BAR = 'var(--accent)';
+const GRID = 'var(--line)';
+const AXIS_INK = 'var(--ink-soft)';
+const AXIS_LINE = 'var(--line)';
 
 /**
  * Pick an axis scale whose ticks land on round numbers AND whose ceiling sits
@@ -112,7 +115,7 @@ export function ColumnChart({ title, data, valueKey, labelKey, format, height = 
               />
               <path
                 d={columnPath(x, y, barW, Math.max(h, value > 0 ? 2 : 0))}
-                fill={BLUE}
+                fill={BAR}
                 opacity={hover && !active ? 0.55 : 1}
                 pointerEvents="none"
               />
@@ -124,7 +127,7 @@ export function ColumnChart({ title, data, valueKey, labelKey, format, height = 
           );
         })}
 
-        <line x1={padL} x2={width - padR} y1={padT + plotH} y2={padT + plotH} stroke="#c9d5da" strokeWidth="1" />
+        <line x1={padL} x2={width - padR} y1={padT + plotH} y2={padT + plotH} stroke={AXIS_LINE} strokeWidth="1" />
       </svg>
 
       {hover && (
@@ -137,7 +140,8 @@ export function ColumnChart({ title, data, valueKey, labelKey, format, height = 
             left: `${Math.min(92, Math.max(8, (hover.x / width) * 100))}%`,
             top: hover.y,
             transform: hover.y < 34 ? 'translate(-50%, 6px)' : 'translate(-50%, -115%)',
-            background: '#0c3547', color: '#fff', padding: '5px 9px', borderRadius: 5,
+            background: 'var(--chrome-deep)', color: 'var(--ink)',
+            border: '1px solid var(--line)', padding: '5px 9px', borderRadius: 5,
             fontSize: 12, whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 5,
           }}
         >
@@ -177,7 +181,7 @@ export function RankedBars({ data, labelKey, valueKey, shareKey, format }) {
               </span>
             </div>
             <div style={{ background: GRID, borderRadius: 4, height: 9 }}>
-              <div style={{ width: `${pct}%`, background: BLUE, borderRadius: 4, height: '100%' }} />
+              <div style={{ width: `${pct}%`, background: BAR, borderRadius: 4, height: '100%' }} />
             </div>
           </div>
         );
