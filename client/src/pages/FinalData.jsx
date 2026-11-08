@@ -56,6 +56,9 @@ const COLUMNS = [
   { key: 'status', label: 'On', sortable: false, pinned: true, resizable: false,
     width: 52, sticky: 'col-pin-a' },
   { key: 'adsetName',   label: 'Adset',   width: 260, sticky: 'col-pin-b' },
+  /* Only meaningful when several accounts are on screen at once, so it is
+     dropped from the list below unless they are. */
+  { key: 'accountName', label: 'Account', width: 170, combinedOnly: true },
   { key: 'budget',      label: 'Budget',  numeric: true },
   { key: 'spend',       label: 'Spend',   numeric: true },
   { key: 'revenue',     label: 'Revenue', numeric: true },
@@ -69,7 +72,19 @@ const COLUMNS = [
   { key: 'clicks',      label: 'Clicks',  numeric: true },
 ];
 
-const money = (n) => `${Number(n || 0).toFixed(2)} $`;
+/**
+ * An amount with the currency it is actually in.
+ *
+ * Everything used to be suffixed "$" because there was only ever one account
+ * on screen. Several accounts can now be combined, and they need not share a
+ * currency — so a row carries its own, and a total over mixed currencies
+ * (code null) is printed bare, with the note under the table saying why.
+ */
+const money = (n, code = 'USD') => {
+  const amount = Number(n || 0).toFixed(2);
+  if (code === null) return amount;
+  return `${amount} ${code === 'USD' ? '$' : code}`;
+};
 const int = (n) => Number(n || 0).toLocaleString();
 const dash = <span className="muted">—</span>;
 
@@ -89,8 +104,22 @@ export default function FinalData() {
   const [sort, setSort] = useState({ key: 'spend', dir: 'desc' });
 
   /* Which columns show and how wide they are, remembered in this browser. */
+  /* The Account column exists only while several accounts are being shown
+     together; otherwise every row would repeat the same value. */
+  const combined = Boolean(data?.meta?.combined);
+  /* A row's own currency, falling back to USD so nothing reads blank if the
+     server omits it. null (never here) is what prints an amount bare. */
+  const cur = (r) => r.currency || 'USD';
+  /* null when the combined accounts do not share a currency: the server says
+     so, and money() then leaves the suffix off rather than picking one. */
+  const totalCurrency = data?.meta?.currency === undefined ? 'USD' : data.meta.currency;
+  const columns = useMemo(
+    () => COLUMNS.filter((c) => !c.combinedOnly || combined),
+    [combined]
+  );
+
   const { hidden, visible, widths, toggle, setWidth, reset, customised } =
-    useColumnPrefs('tonic.finalData.columns', COLUMNS);
+    useColumnPrefs('tonic.finalData.columns', columns);
 
   /* The unmatched list is a diagnostic, not part of the daily read, so it
      stays folded away until asked for. */
@@ -197,6 +226,8 @@ export default function FinalData() {
   };
 
   const openBudget = (row) => {
+    // A restricted account is read-only, so the cell is not a button for them.
+    if (restricted) return;
     // Lifetime budgets are not editable here; Meta needs a different field and
     // changing one mid-flight has consequences this screen can't explain well.
     if (row.budget == null || row.budgetType !== 'daily') return;
@@ -217,7 +248,7 @@ export default function FinalData() {
 
     setSavingBudget(true);
     try {
-      const res = await api.finalData.setBudget(row.budgetOwnerId, amount, accountId);
+      const res = await api.finalData.setBudget(row.budgetOwnerId, amount, row.accountId || accountId);
       // Patch in place rather than refetching — a reload would re-pull every
       // Tonic day for one number. Every row sharing this budget updates, since
       // a campaign budget is one number behind several adsets.
@@ -352,7 +383,9 @@ export default function FinalData() {
                 was while you look at one adset's history. */}
             <a
               className="link"
-              href={`/final-data/adsets/${r.adsetId}?account=${encodeURIComponent(accountId)}`}
+              /* The row's own account, not the picker's: in the combined
+                 view the picker says "all", which is not an account. */
+              href={`/final-data/adsets/${r.adsetId}?account=${encodeURIComponent(r.accountId || accountId)}`}
               target="_blank"
               rel="noreferrer"
               title="Open this adset's day-by-day history in a new tab"
@@ -372,16 +405,22 @@ export default function FinalData() {
             </div>
           </>
         );
+      case 'accountName': return (
+        <>
+          {r.accountName || r.accountId}
+          {r.currency && <span className="muted" style={{ fontSize: 11 }}> · {r.currency}</span>}
+        </>
+      );
       case 'budget':  return budgetCell(r);
-      case 'spend':   return money(r.spend);
+      case 'spend':   return money(r.spend, cur(r));
       case 'revenue':
-        return r.matched ? money(r.revenue) : (
+        return r.matched ? money(r.revenue, cur(r)) : (
           <span className="muted" title="No Tonic sessions carried this adset ID">—</span>
         );
-      case 'profit':  return money(r.profit);
+      case 'profit':  return money(r.profit, cur(r));
       case 'roi':     return r.roi == null ? dash : `${r.roi} %`;
-      case 'cpl':     return r.cpl == null ? dash : money(r.cpl);
-      case 'rpc':     return r.rpc == null ? dash : money(r.rpc);
+      case 'cpl':     return r.cpl == null ? dash : money(r.cpl, cur(r));
+      case 'rpc':     return r.rpc == null ? dash : money(r.rpc, cur(r));
       default:        return int(r[col.key]);
     }
   };
@@ -389,14 +428,15 @@ export default function FinalData() {
   const footCell = (col, totals) => {
     switch (col.key) {
       case 'status':
-      case 'adsetName': return null;
-      case 'budget':    return money(totals.budget);
-      case 'spend':     return money(totals.spend);
-      case 'revenue':   return money(totals.revenue);
-      case 'profit':    return money(totals.profit);
+      case 'adsetName':
+      case 'accountName': return null;
+      case 'budget':    return money(totals.budget, totalCurrency);
+      case 'spend':     return money(totals.spend, totalCurrency);
+      case 'revenue':   return money(totals.revenue, totalCurrency);
+      case 'profit':    return money(totals.profit, totalCurrency);
       case 'roi':       return totals.roi == null ? dash : `${totals.roi} %`;
-      case 'cpl':       return totals.cpl == null ? dash : money(totals.cpl);
-      case 'rpc':       return totals.rpc == null ? dash : money(totals.rpc);
+      case 'cpl':       return totals.cpl == null ? dash : money(totals.cpl, totalCurrency);
+      case 'rpc':       return totals.rpc == null ? dash : money(totals.rpc, totalCurrency);
       default:          return int(totals[col.key]);
     }
   };
@@ -428,6 +468,12 @@ export default function FinalData() {
         >
           {accountsLoading && <option value="">Loading…</option>}
           {!accountsLoading && accounts.length === 0 && <option value="">No ad accounts</option>}
+          {/* Only for an account restricted to a few ad accounts: an admin
+              sees every account the token has, and fetching all of those at
+              once would be minutes of Facebook calls. */}
+          {restricted && accounts.length > 1 && (
+            <option value="all">All my ad accounts ({accounts.length})</option>
+          )}
           {visibleAccounts.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}{a.currency ? ` (${a.currency})` : ''}{a.active ? '' : ' — inactive'}
@@ -499,7 +545,7 @@ export default function FinalData() {
             />
 
             <ColumnsMenu
-              columns={COLUMNS}
+              columns={columns}
               hidden={hidden}
               toggle={toggle}
               reset={reset}

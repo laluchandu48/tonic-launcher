@@ -52,6 +52,14 @@ router.use((req, res, next) => {
     });
   }
 
+  /* "all" means every account assigned to them — still their own set, so it
+     is not a way around the restriction. */
+  if (String(req.query.account || '').trim().toLowerCase() === 'all') {
+    req.allowedAccounts = allowed;
+    req.query.account = 'all';
+    return next();
+  }
+
   const asked = normaliseAdAccountId(req.query.account);
   if (asked && !allowed.includes(asked)) {
     return res.status(403).json({ error: 'That ad account is not assigned to you.', code: 'FORBIDDEN' });
@@ -61,6 +69,29 @@ router.use((req, res, next) => {
   req.query.account = asked || allowed[0];
   next();
 });
+
+/**
+ * Which ad account a request about one adset should use.
+ *
+ * "all" is not an account ID, and for a restricted user the stored account is
+ * not necessarily one of theirs — falling back to it would answer about
+ * somebody else's account. The guard above has already refused any account
+ * they were not assigned, so what arrives here is either theirs or unset.
+ */
+function accountFor(req, asked) {
+  const id = normaliseAdAccountId(asked);
+  const allowed = req.allowedAccounts;
+  if (allowed) return id && allowed.includes(id) ? id : allowed[0];
+  return id || readFbSettings().adAccountId;
+}
+
+/**
+ * How many ad accounts the "all" view will fetch at once.
+ *
+ * Each one costs four Facebook calls, taken one at a time, so this is the
+ * line between a page and a wait.
+ */
+const MAX_ALL_ACCOUNTS = 5;
 
 /** Tonic refuses a session report older than this. */
 const MAX_LOOKBACK_DAYS = 50;
@@ -198,9 +229,18 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
   const stored = readFbSettings();
   const param = String(req.query.param || stored.joinParam).trim();
 
-  // The ad account is chosen on the screen. Fall back to the last one used,
-  // then to the first the token can see, so a fresh install still shows data.
-  let accountId = normaliseAdAccountId(req.query.account) || stored.adAccountId;
+  /* "all" is a restricted user asking for every account assigned to them —
+     the guard above has already established that set. It is not an account ID,
+     so it has to be recognised before normalising, which would turn it into
+     null and quietly fall back to whichever account was stored last. Only
+     honoured when there is an assigned set: for an admin, "all" would mean
+     every account the token can see, which is far too many to fetch. */
+  const askedAll = String(req.query.account || '').trim().toLowerCase() === 'all'
+    && Array.isArray(req.allowedAccounts) && req.allowedAccounts.length > 0;
+
+  // Otherwise the ad account is chosen on the screen. Fall back to the last
+  // one used, then to the first the token can see, so a fresh install shows data.
+  let accountId = askedAll ? 'all' : (normaliseAdAccountId(req.query.account) || stored.adAccountId);
   if (!accountId) {
     const accounts = await getFbClient().getAdAccounts();
     if (!accounts.length) {
@@ -212,7 +252,12 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     }
     accountId = accounts[0].id;
   }
-  if (accountId !== stored.adAccountId) rememberAdAccount(accountId);
+  /* Remembering is for the admin's own picker. "all" is not an account, and a
+     restricted user's choice is theirs alone — writing it here would move the
+     admin's default to whatever a viewer last looked at. */
+  if (!askedAll && !req.allowedAccounts && accountId !== stored.adAccountId) {
+    rememberAdAccount(accountId);
+  }
 
   const today = new Date();
   const floor = rangeFloor(today);
@@ -243,24 +288,46 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
   // Tonic and Facebook are different APIs with separate limits, so those two
   // run together. Within Facebook the client serialises calls itself — an app
   // on the development access tier allows only one at a time.
-  const [fbSide, tonicFill] = await Promise.all([
+  /* Normally one account. A restricted user may ask for every account
+     assigned to them, which is still their own set — not a way around the
+     restriction, just a combined view of it. */
+  const wantsAll = accountId === 'all';
+  const assigned = req.allowedAccounts || [];
+  const accountIds = wantsAll ? assigned.slice(0, MAX_ALL_ACCOUNTS) : [accountId];
+
+  if (wantsAll && assigned.length > MAX_ALL_ACCOUNTS) {
+    notes.push(
+      `Showing the first ${MAX_ALL_ACCOUNTS} of your ${assigned.length} ad accounts. `
+      + 'Each one costs four Facebook calls, so fetching them all at once takes too long '
+      + 'to be useful — pick an account from the list to see the rest.'
+    );
+  }
+
+  const [perAccount, tonicFill] = await Promise.all([
     (async () => {
-      const insights = await getFbClient().getAdsetInsights({ since: from, until: to, accountId });
-      // Status and budget are not Insights fields, so they come from the
-      // adsets and campaigns edges. A failure in either must not cost the
-      // whole report — the numbers still stand without them.
-      const meta = await getFbClient().getAdsetMeta(accountId).catch(() => new Map());
-      const campaignMeta = await getFbClient().getCampaignMeta(accountId).catch(() => new Map());
-      const account = await getFbClient().getAccountInfo(accountId)
-        .catch(() => ({ currency: 'USD', minorUnits: 100 }));
-      return { insights, meta, campaignMeta, account };
+      const out = [];
+      for (const id of accountIds) {
+        // Serial on purpose: the development access tier allows about one
+        // Facebook call at a time, and a burst here is what produced #613.
+        const insights = await getFbClient().getAdsetInsights({ since: from, until: to, accountId: id });
+        // Status and budget are not Insights fields, so they come from the
+        // adsets and campaigns edges. A failure in either must not cost the
+        // whole report — the numbers still stand without them.
+        const meta = await getFbClient().getAdsetMeta(id).catch(() => new Map());
+        const campaignMeta = await getFbClient().getCampaignMeta(id).catch(() => new Map());
+        const account = await getFbClient().getAccountInfo(id)
+          .catch(() => ({ id, name: id, currency: 'USD', minorUnits: 100 }));
+        out.push({ id, insights, meta, campaignMeta, account });
+      }
+      return out;
     })(),
     ensureTonicRange(from, to, param, lastFinalDate),
   ]);
 
-  const { insights: fb, meta, campaignMeta, account } = fbSide;
-
-  const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
+  /* Flattened with each adset carrying the account it came from, so the loop
+     below reads the same whether this is one account or five. */
+  const allAds = perAccount.flatMap((slice) =>
+    slice.insights.rows.map((ad) => ({ ...ad, slice })));
 
   const tonic = sessionDays.range(from, to, param);
   const byKey = new Map(tonic.map((r) => [String(r.key), r]));
@@ -268,7 +335,10 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
   const rows = [];
   const matchedKeys = new Set();
 
-  for (const ad of fb.rows) {
+  for (const ad of allAds) {
+    const { meta, campaignMeta, account } = ad.slice;
+    const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
+
     const hit = byKey.get(ad.adsetId);
     if (hit) matchedKeys.add(ad.adsetId);
 
@@ -305,6 +375,11 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     rows.push({
       adsetId: ad.adsetId,
       adsetName: ad.adsetName,
+      // Which account this row belongs to — only interesting in the combined
+      // view, but harmless and cheap to carry in the single-account one.
+      accountId: account.id || ad.slice.id,
+      accountName: account.name || ad.slice.id,
+      currency: account.currency || 'USD',
       // ACTIVE, PAUSED, CAMPAIGN_PAUSED, ARCHIVED and so on — effectiveStatus
       // accounts for the campaign above it, which plain status does not.
       status: delivery.effectiveStatus || delivery.status || null,
@@ -348,6 +423,18 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     }))
     .sort((a, b) => b.revenue - a.revenue);
 
+  const currencies = [...new Set(perAccount.map((slice) => slice.account.currency || 'USD'))];
+  if (currencies.length > 1) {
+    /* Adding £1 to €1 gives 2 of nothing. The rows stay, each labelled with
+       its own currency, and the total says it cannot be trusted rather than
+       printing a number that looks authoritative. */
+    notes.push(
+      `These accounts bill in different currencies (${currencies.join(', ')}), so the spend, `
+      + 'profit and ROI totals below add up amounts that are not the same unit. Read the rows, '
+      + 'not the total, or pick one account.'
+    );
+  }
+
   const sum = (list, field) => list.reduce((n, r) => n + (Number(r[field]) || 0), 0);
   const spend = sum(rows, 'spend');
   const revenue = sum(rows, 'revenue');
@@ -355,7 +442,9 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
   if (!rows.some((r) => r.matched) && tonic.length > 0) {
     notes.push(`No Facebook adset ID matched a Tonic "${param}" value. Check that your tracking link passes the adset ID in ${param}.`);
   }
-  if (fb.truncated) notes.push('Facebook returned more pages of adsets than this fetches; totals may be low.');
+  if (perAccount.some((slice) => slice.insights.truncated)) {
+    notes.push('Facebook returned more pages of adsets than this fetches; totals may be low.');
+  }
   if (tonicFill.truncatedDays.length) {
     notes.push(`Some days had more sessions than one fetch covers (${tonicFill.truncatedDays.join(', ')}); revenue for them may be low.`);
   }
@@ -395,7 +484,16 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     },
     meta: {
       from, to, dataStart: DATA_START_DATE, param, lastFinalDate, accountId,
-      currency: account.currency || 'USD',
+      /* One currency when every account shares it, otherwise none — the page
+         then labels each row rather than implying a single unit. */
+      currency: currencies.length === 1 ? currencies[0] : null,
+      currencies,
+      accounts: perAccount.map((slice) => ({
+        id: slice.account.id || slice.id,
+        name: slice.account.name || slice.id,
+        currency: slice.account.currency || 'USD',
+      })),
+      combined: wantsAll,
       daysFetched: tonicFill.fetched,
       daysFromCache: tonicFill.cached,
       adsets: rows.length,
@@ -419,7 +517,7 @@ router.put('/budget/:id', requireFbCredentials, asyncRoute(async (req, res) => {
     });
   }
 
-  const accountId = normaliseAdAccountId(req.body?.account) || readFbSettings().adAccountId;
+  const accountId = accountFor(req, req.body?.account);
   const account = await getFbClient().getAccountInfo(accountId);
   const minorUnits = account.minorUnits || minorUnitsPerUnit(account.currency);
 
@@ -461,7 +559,7 @@ router.get('/adsets/:id/history', requireCredentials, requireFbCredentials, asyn
     from = floor;
   }
 
-  const accountId = normaliseAdAccountId(req.query.account) || stored.adAccountId;
+  const accountId = accountFor(req, req.query.account);
 
   let lastFinalDate = null;
   try {
@@ -819,7 +917,7 @@ router.get('/adsets/:id/hours', requireCredentials, requireFbCredentials, asyncR
     return res.status(400).json({ error: 'That day has not happened yet.' });
   }
 
-  const accountId = normaliseAdAccountId(req.query.account) || stored.adAccountId;
+  const accountId = accountFor(req, req.query.account);
   const notes = [];
 
   const account = await getFbClient().getAccountInfo(accountId)

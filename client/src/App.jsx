@@ -58,7 +58,7 @@ export default function App() {
       <SessionProvider value={user}>
         <ToastProvider>
           <Routes>
-            <Route path="*" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+            <Route path="*" element={<Account user={user} onSignedOut={() => setUser(null)} onUserChanged={setUser} />} />
           </Routes>
         </ToastProvider>
       </SessionProvider>
@@ -74,7 +74,7 @@ export default function App() {
           <Routes>
             <Route path="/final-data" element={<FinalData />} />
           <Route path="/final-data/adsets/:id" element={<AdsetHistory />} />
-            <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+            <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} onUserChanged={setUser} />} />
             <Route path="*" element={<Navigate to="/final-data" replace />} />
           </Routes>
         </ToastProvider>
@@ -98,7 +98,7 @@ export default function App() {
         <Route path="/fb-settings" element={<FbSettings />} />
         <Route path="/tonic-account" element={<TonicAccount />} />
         <Route path="/settings" element={<Settings />} />
-        <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} />} />
+        <Route path="/account" element={<Account user={user} onSignedOut={() => setUser(null)} onUserChanged={setUser} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ToastProvider>

@@ -6,7 +6,7 @@ import { api } from '../lib/api.js';
 
 const MIN_LENGTH = 8;
 
-export default function Account({ user, onSignedOut }) {
+export default function Account({ user, onSignedOut, onUserChanged }) {
   const toast = useToast();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -27,6 +27,18 @@ export default function Account({ user, onSignedOut }) {
       await api.auth.changePassword(currentPassword, newPassword);
       setCurrentPassword(''); setNewPassword(''); setConfirm('');
       toast.success('Password changed.');
+
+      /* The app routes everything here while `mustChange` is set, so it has
+         to learn that it no longer is — otherwise the sidebar links change
+         the URL and this screen keeps rendering, which only a reload fixed. */
+      if (onUserChanged) {
+        try {
+          const { user: fresh } = await api.auth.me();
+          onUserChanged(fresh);
+        } catch {
+          /* Signed in but stale: a reload will sort it out. */
+        }
+      }
     } catch (err) {
       if (err.fields) setErrors(err.fields);
       toast.error(err.message);
