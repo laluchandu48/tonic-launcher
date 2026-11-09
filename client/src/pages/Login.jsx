@@ -31,7 +31,7 @@ export default function Login({ onSignedIn }) {
   return (
     <div className="login-shell">
       <form className="card login-card" onSubmit={submit}>
-        <div className="brand" style={{ marginBottom: 4 }}>TONIC.</div>
+        <div className="brand" style={{ marginBottom: 4 }}>TRACK.</div>
         <p className="hint" style={{ marginBottom: 20 }}>Launcher</p>
 
         <div className="field">

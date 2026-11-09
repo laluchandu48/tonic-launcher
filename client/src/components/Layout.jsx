@@ -26,7 +26,7 @@ export default function Layout({ title, tools, actions, children }) {
   return (
     <div className="shell">
       <nav className="sidebar">
-        <div className="brand">TONIC.</div>
+        <div className="brand">TRACK.</div>
         <div className="nav">
           {nav.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}>
