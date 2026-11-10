@@ -10,6 +10,8 @@ import { languageName, byLanguageName } from '../lib/languages.js';
 const PHRASE_SLOTS = 5;
 const REQUIRED_PHRASES = 3;
 
+const isRejected = (r) => String(r.status || '').toLowerCase() === 'rejected';
+
 const statusTone = (status) => ({
   published: 'badge-ok',
   approved: 'badge-ok',
@@ -112,11 +114,19 @@ export default function Articles() {
    */
   const visibleRequests = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return requests;
-    return requests.filter((r) => [
+    const matching = !q ? requests : requests.filter((r) => [
       r.tonic_request_id, r.articleId, r.headline_id, r.status, r.headline,
       r.offer_name, r.offer_id, r.country, languageName(r.language), r.domain,
     ].some((v) => String(v ?? '').toLowerCase().includes(q)));
+
+    /* Rejected requests last. They are the ones nothing can be done with, so
+       they belong under the ones you might still launch — kept rather than
+       hidden, because a rejection is worth reading once. Array.sort is stable
+       in every engine this runs in, so the order within each group is the one
+       the server sent. */
+    return [...matching].sort(
+      (a, b) => Number(isRejected(a)) - Number(isRejected(b))
+    );
   }, [requests, search]);
 
   /** A domain only accepts certain languages, so the choice of domain narrows it. */

@@ -7,11 +7,15 @@ import { useSession } from '../components/SessionContext.jsx';
 /**
  * The three levels, in the order they are offered: least access first, so
  * the safe choice is the one already selected.
+ *
+ * The labels are short because a dropdown is a bad place for a sentence —
+ * the long one got clipped in the list. What each level means goes in the
+ * hint under the field, where there is room for it.
  */
 const LEVELS = [
   { value: 'viewer', label: 'Read-only',
     hint: 'Sees Final Data for the ad accounts you assign. Changes nothing.' },
-  { value: 'editor', label: 'Can edit budgets and pause adsets',
+  { value: 'editor', label: 'Can edit',
     hint: 'The same screen, plus the budget and on/off controls — on their own ad accounts only.' },
   { value: 'admin', label: 'Admin',
     hint: 'Everything you can do, including the Tonic and Facebook credentials. All ad accounts.' },
@@ -229,7 +233,14 @@ export default function Users() {
 
             <div className="field">
               <label htmlFor="level">Access</label>
-              <select id="level" value={role} onChange={(e) => setRole(e.target.value)}>
+              {/* Narrow on purpose: a full-width select makes a dropdown as
+                  wide as the card, and the list was being clipped. */}
+              <select
+                id="level"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                style={{ maxWidth: 260 }}
+              >
                 {LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
               </select>
               <p className="hint">{LEVELS.find((l) => l.value === role)?.hint}</p>
@@ -302,6 +313,8 @@ export default function Users() {
                           value={u.role}
                           onChange={(e) => setLevel(u, e.target.value)}
                           aria-label={`Access for ${u.email || u.username}`}
+                          title={LEVELS.find((l) => l.value === u.role)?.hint}
+                          style={{ maxWidth: 160 }}
                         >
                           {LEVELS.map((l) => (
                             <option key={l.value} value={l.value}>{l.label}</option>

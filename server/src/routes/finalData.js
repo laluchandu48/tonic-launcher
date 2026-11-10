@@ -750,6 +750,12 @@ export function foldAccount(insightRows, byKey) {
     clicks,
     leads,
     conversions,
+    /* Cost and revenue per Tonic session click. Null rather than zero when
+       nothing converted: a blank reads as "no data", a zero reads as "free",
+       and only one of those is true. Computed here so this screen and Final
+       Data cannot drift apart on what CPL means. */
+    cpl: conversions > 0 ? round(spend / conversions, 3) : null,
+    rpc: conversions > 0 ? round(revenue / conversions, 3) : null,
   };
 }
 
@@ -774,6 +780,10 @@ export function totalsFrom(rows) {
     conversions: sum('conversions'),
     impressions: sum('impressions'),
     clicks: sum('clicks'),
+    /* From the summed spend and revenue, not an average of the rows' own
+       CPLs — a mean of ratios weights a tiny account like a large one. */
+    cpl: sum('conversions') > 0 ? round(spend / sum('conversions'), 3) : null,
+    rpc: sum('conversions') > 0 ? round(revenue / sum('conversions'), 3) : null,
     currency: 'USD',
   };
 }

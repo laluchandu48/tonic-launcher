@@ -36,6 +36,8 @@ export default function Dashboard() {
   const [daily, setDaily] = useState(null);
   const [offers, setOffers] = useState(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [statsRefreshing, setStatsRefreshing] = useState(false);
+  const [statsFetchedAt, setStatsFetchedAt] = useState(null);
 
   /* Today's Facebook side. Kept in its own request and its own state because
      it can be unavailable (no token, no ad account) while everything else on
@@ -50,32 +52,46 @@ export default function Dashboard() {
 
   const [calculating, setCalculating] = useState(false);
 
+  /**
+   * The Tonic side of the screen.
+   *
+   * Pulled out of the mount effect so the Refresh button can ask for it
+   * again: nothing here is cached server-side, so a second call is simply
+   * the current numbers. Today's figures move all day, which is the whole
+   * reason for the button.
+   */
+  const loadStats = useCallback(async (refresh = false) => {
+    if (refresh) setStatsRefreshing(true);
+    try {
+      const { today } = await api.stats.today();
+      const from = shift(today, -6);
+      const [sum, day, off] = await Promise.all([
+        api.stats.summary(),
+        api.stats.get({ from, to: today, group: 'day' }),
+        api.stats.offers({ from, to: today, limit: 5 }),
+      ]);
+      setSummary(sum);
+      setDaily(day);
+      setOffers(off);
+      /* Only on the first load: the same note toasted on every refresh
+         would be nagging rather than informative. */
+      if (!refresh) day.notes?.forEach((n) => toast.info(n));
+      setTodayIso(today);
+      setStatsFetchedAt(Date.now());
+    } catch (err) {
+      if (err.code !== 'NO_CREDENTIALS') toast.error(err.message);
+    } finally {
+      setLoadingStats(false);
+      setStatsRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
     api.settings.get().then(setSettings).catch(() => {});
     api.articles.list().then((r) => setRequests(r.rows || [])).catch(() => {});
     api.campaigns.launched().then(setLaunched).catch(() => {});
-
-    (async () => {
-      try {
-        const { today } = await api.stats.today();
-        const from = shift(today, -6);
-        const [sum, day, off] = await Promise.all([
-          api.stats.summary(),
-          api.stats.get({ from, to: today, group: 'day' }),
-          api.stats.offers({ from, to: today, limit: 5 }),
-        ]);
-        setSummary(sum);
-        setDaily(day);
-        setOffers(off);
-        day.notes?.forEach((n) => toast.info(n));
-        setTodayIso(today);
-      } catch (err) {
-        if (err.code !== 'NO_CREDENTIALS') toast.error(err.message);
-      } finally {
-        setLoadingStats(false);
-      }
-    })();
-  }, []);
+    loadStats(false);
+  }, [loadStats]);
 
   const calculateAllTime = async () => {
     setCalculating(true);
@@ -290,7 +306,7 @@ export default function Dashboard() {
                 </p>
               </div>
             ) : (
-              <div className="table-scroll" style={{ '--table-min': '620px' }}>
+              <div className="table-scroll" style={{ '--table-min': '780px' }}>
                 <table>
                   <thead>
                     <tr>
@@ -299,6 +315,8 @@ export default function Dashboard() {
                       <th className="num">Revenue</th>
                       <th className="num">Profit</th>
                       <th className="num">ROI</th>
+                      <th className="num" title="Spend per Tonic session click">CPL</th>
+                      <th className="num" title="Revenue per Tonic session click">RPC</th>
                       <th className="num" title="Adsets with Tonic revenue against them, of all adsets with spend">Matched</th>
                     </tr>
                   </thead>
@@ -320,13 +338,15 @@ export default function Dashboard() {
                         {r.error ? (
                           /* A row of zeros would read as "spent nothing" rather
                              than "could not be asked", so it says which. */
-                          <td className="muted" colSpan={5}>{r.error}</td>
+                          <td className="muted" colSpan={7}>{r.error}</td>
                         ) : (
                           <>
                             <td className="num">{money(r.spend)}</td>
                             <td className="num">{money(r.revenue)}</td>
                             <td className={`num ${tone(r.profit)}`}>{money(r.profit)}</td>
                             <td className={`num ${tone(r.roi)}`}>{r.roi == null ? '—' : `${r.roi} %`}</td>
+                            <td className="num">{r.cpl == null ? '—' : money(r.cpl)}</td>
+                            <td className="num">{r.rpc == null ? '—' : money(r.rpc)}</td>
                             <td className="num muted">{r.matched} / {r.adsets}</td>
                           </>
                         )}
@@ -343,6 +363,8 @@ export default function Dashboard() {
                         <td className={`num ${tone(fbToday.roi)}`}>
                           {fbToday.roi == null ? '—' : `${fbToday.roi} %`}
                         </td>
+                        <td className="num">{fbToday.cpl == null ? '—' : money(fbToday.cpl)}</td>
+                        <td className="num">{fbToday.rpc == null ? '—' : money(fbToday.rpc)}</td>
                         <td />
                       </tr>
                     </tfoot>
@@ -408,11 +430,27 @@ export default function Dashboard() {
 
       {/* ── Daily stats ── */}
       <div className="card" style={{ marginBottom: 18 }}>
-        <div className="card-head">
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 10 }}>
           <h2>Daily stats</h2>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {daily ? `${daily.from} to ${daily.to}` : ''}
-          </span>
+          <div className="toolbar">
+            <span className="muted" style={{ fontSize: 12 }}>
+              {daily ? `${daily.from} to ${daily.to}` : ''}
+            </span>
+            {statsFetchedAt && (
+              <span className="muted" style={{ fontSize: 12 }}>
+                as of {new Date(statsFetchedAt).toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              className="btn btn-secondary"
+              onClick={() => loadStats(true)}
+              disabled={statsRefreshing || loadingStats}
+              title="Asks Tonic for these days again — today's revenue keeps moving"
+            >
+              {statsRefreshing && <span className="spinner" />}
+              {statsRefreshing ? 'Fetching…' : 'Refresh'}
+            </button>
+          </div>
         </div>
         {loadingStats ? (
           <div className="empty">Loading…</div>
