@@ -11,11 +11,15 @@ import { api } from '../lib/api.js';
 /**
  * Country — which GEOs are paying for themselves.
  *
- * One row per Tonic campaign per country: revenue and conversions from Tonic's
- * session report, spend and leads from Facebook's country breakdown. Both
- * sides are asked for the same range and joined on the adset id in the
- * tracking link, so the numbers are the same ones Final Data shows, cut a
- * different way.
+ * One row per Tonic campaign — worldwide, every country it ran in — and a
+ * caret to open the countries underneath it. The campaign is what people
+ * compare; the GEO split is the follow-up question, so it is one click away
+ * rather than spread across a dozen rows you have to add up by eye.
+ *
+ * Revenue and conversions come from Tonic's session report, spend and leads
+ * from Facebook's country breakdown. Both sides are asked for the same range
+ * and joined on the adset id in the tracking link, so these are the numbers
+ * Final Data shows, cut a different way.
  */
 
 function shift(iso, days) {
@@ -56,6 +60,33 @@ const dash = <span className="muted">—</span>;
 const tone = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : '');
 
 /**
+ * Add up a set of country rows the way the server adds up a campaign: from
+ * the sums, never by averaging the ratios. Used when a search narrows a
+ * campaign to some of its countries, so the row above them is the total of
+ * what is actually on screen.
+ */
+function fold(list) {
+  const sum = (f) => list.reduce((n, r) => n + (Number(r[f]) || 0), 0);
+  const spend = sum('spend');
+  const revenue = sum('revenue');
+  const conversions = sum('conversions');
+  const profit = revenue - spend;
+  return {
+    spend,
+    revenue,
+    profit,
+    roi: spend > 0 ? Math.round((profit / spend) * 1000) / 10 : null,
+    leads: sum('leads'),
+    conversions,
+    sessions: sum('sessions'),
+    impressions: sum('impressions'),
+    clicks: sum('clicks'),
+    cpl: conversions > 0 ? spend / conversions : null,
+    rpc: conversions > 0 ? revenue / conversions : null,
+  };
+}
+
+/**
  * A country code as its flag. The regional-indicator trick maps AB to 🇦🇧; the
  * code stays beside it, because a flag nobody recognises is not a label.
  */
@@ -76,6 +107,8 @@ export default function Country() {
   const [today, setToday] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState({ key: 'spend', dir: 'desc' });
+  /** Which campaigns are showing their countries. */
+  const [expanded, setExpanded] = useState(() => new Set());
 
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
@@ -159,27 +192,58 @@ export default function Country() {
   const currency = data?.meta?.currency || 'USD';
   const countryLabel = (code) => (code === '??' ? 'Not reported' : names[code] || code);
 
+  const matchesCountry = (r, q) => [r.country, countryLabel(r.country)]
+    .some((v) => String(v ?? '').toLowerCase().includes(q));
+
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = (data?.rows || []).filter((r) => {
-      if (!q) return true;
-      return [r.campaignName, r.country, countryLabel(r.country)]
-        .some((v) => String(v ?? '').toLowerCase().includes(q));
-    });
-    /* Sorting the country column by its name rather than its code, since the
-       name is what is on screen. */
+    const list = (data?.rows || [])
+      .map((r) => {
+        if (!q) return r;
+        const byName = String(r.campaignName ?? '').toLowerCase().includes(q);
+        const hits = (r.countries || []).filter((c) => matchesCountry(c, q));
+        if (byName) return r;
+        /* Matched on a country, not the name: show the campaign with only
+           the countries that matched, and with its figures recomputed from
+           them — a row headed 60.00 above a single 20.00 country would be
+           read as the campaign's total for that country. */
+        return hits.length ? { ...r, ...fold(hits), countries: hits, onlyMatches: true } : null;
+      })
+      .filter(Boolean);
+
+    /* The country column sorts by what is on screen — the campaign's country
+       count, or its single country's name. */
     const columnsForSort = COLUMNS.map((c) => (
-      c.key === 'country' ? { ...c, value: (r) => countryLabel(r.country) } : c
+      c.key === 'country'
+        ? { ...c, value: (r) => (r.countries?.length === 1 ? countryLabel(r.countries[0].country) : `\uffff${r.countries?.length || 0}`) }
+        : c
     ));
     return sortRows(list, columnsForSort, sort);
   }, [data, search, sort, names]);
+
+  /* A search that matched on a country opens those campaigns: the match is
+     in the detail, so hiding it would look like a wrong result. */
+  const openRows = useMemo(() => {
+    const auto = new Set(rows.filter((r) => r.onlyMatches).map((r) => r.campaignId || ''));
+    return new Set([...expanded, ...auto]);
+  }, [rows, expanded]);
+
+  /* Not `toggle`: that name already belongs to the column menu. */
+  const toggleCountries = (id) => setExpanded((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   /** The totals follow what is on screen: a filtered table with the whole
       account's total under it invites the wrong conclusion. */
   const totals = useMemo(() => {
     if (!data) return null;
     if (!search.trim()) return data.totals;
-    const sum = (f) => rows.reduce((n, r) => n + (Number(r[f]) || 0), 0);
+    /* Of the rows actually shown, countries included when a search narrowed
+       a campaign to some of them. */
+    const shown = rows.flatMap((r) => (r.onlyMatches ? r.countries : [r]));
+    const sum = (f) => shown.reduce((n, r) => n + (Number(r[f]) || 0), 0);
     const spend = sum('spend');
     const revenue = sum('revenue');
     const conversions = sum('conversions');
@@ -195,24 +259,39 @@ export default function Country() {
     };
   }, [data, rows, search]);
 
-  const cell = (col, r) => {
+  const countryCell = (code) => (
+    <>
+      <Flag code={code} />
+      {countryLabel(code)}
+      {code !== '??' && (
+        <span className="muted mono" style={{ fontSize: 11, marginLeft: 6 }}>{code}</span>
+      )}
+    </>
+  );
+
+  const cell = (col, r, child = false) => {
     switch (col.key) {
       case 'campaignName':
+        if (child) return null;
         return r.campaignName || (
           <span className="muted" title="Spend in a country with no Tonic session against it">
             No Tonic campaign
           </span>
         );
-      case 'country':
+      case 'country': {
+        if (child) return countryCell(r.country);
+        const list = r.countries || [];
+        /* One country is its own answer; several are worth adding up first. */
+        if (list.length === 1) return countryCell(list[0].country);
         return (
           <>
-            <Flag code={r.country} />
-            {countryLabel(r.country)}
-            {r.country !== '??' && (
-              <span className="muted mono" style={{ fontSize: 11, marginLeft: 6 }}>{r.country}</span>
-            )}
+            Worldwide
+            <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>
+              {list.length} countries
+            </span>
           </>
         );
+      }
       case 'spend':
         return (
           <>
@@ -373,20 +452,56 @@ export default function Country() {
                     setWidth={setWidth}
                     sort={sort}
                     onSort={(col) => setSort((s) => nextSort(s, col))}
+                    leading={<th style={{ width: 34 }} aria-label="Expand" />}
                   />
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={`${r.campaignId || 'none'}-${r.country}`}>
-                      {visible.map((col) => (
-                        <td key={col.key} className={tdClass(col, r)}>{cell(col, r)}</td>
-                      ))}
-                    </tr>
-                  ))}
+                  {rows.flatMap((r) => {
+                    const id = r.campaignId || '';
+                    const list = r.countries || [];
+                    /* A campaign narrowed by a search always shows its
+                       countries, even one: that country is the match. */
+                    const many = list.length > 1 || Boolean(r.onlyMatches);
+                    const open = many && openRows.has(id);
+
+                    const head = (
+                      <tr key={id || 'none'}>
+                        <td>
+                          {many && (
+                            <button
+                              type="button"
+                              className="icon-btn icon-btn-plain"
+                              onClick={() => toggleCountries(id)}
+                              aria-expanded={open}
+                              aria-label={`${open ? 'Hide' : 'Show'} the countries for ${r.campaignName || 'this spend'}`}
+                              title={open ? 'Hide the countries' : 'Show this campaign country by country'}
+                            >
+                              <span className={`disclosure-caret ${open ? 'open' : ''}`}>▸</span>
+                            </button>
+                          )}
+                        </td>
+                        {visible.map((col) => (
+                          <td key={col.key} className={tdClass(col, r)}>{cell(col, r)}</td>
+                        ))}
+                      </tr>
+                    );
+
+                    if (!open) return [head];
+
+                    return [head, ...list.map((c) => (
+                      <tr key={`${id}-${c.country}`} className="detail-row">
+                        <td />
+                        {visible.map((col) => (
+                          <td key={col.key} className={tdClass(col, c)}>{cell(col, c, true)}</td>
+                        ))}
+                      </tr>
+                    ))];
+                  })}
                 </tbody>
                 {totals && (
                   <tfoot>
                     <tr className="summary-row">
+                      <td />
                       {visible.map((col, i) => (
                         <td key={col.key} className={tdClass(col, totals)}>
                           {i === labelAt

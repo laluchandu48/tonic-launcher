@@ -168,6 +168,49 @@ export function foldCountries(fbRows, tonicRows) {
   return { rows, splits, unattributed: round(unattributed) };
 }
 
+/**
+ * One row per campaign, with its countries under it.
+ *
+ * The campaign row is the whole campaign — every country it ran in — because
+ * that is the number someone opens this screen to see. Its ratios are worked
+ * out from the summed spend and revenue, never averaged from the country
+ * rows: a campaign with £900 in one GEO and £1 in another is not the mean of
+ * their two ROIs.
+ */
+export function groupByCampaign(rows) {
+  const out = new Map();
+
+  for (const r of rows) {
+    const id = r.campaignId || '';
+    const g = out.get(id) || {
+      campaignId: r.campaignId || null,
+      campaignName: r.campaignName || null,
+      spend: 0, revenue: 0, conversions: 0, sessions: 0,
+      leads: 0, impressions: 0, clicks: 0,
+      estimated: false,
+      countries: [],
+    };
+    g.spend += r.spend;
+    g.revenue += r.revenue;
+    g.conversions += r.conversions;
+    g.sessions += r.sessions;
+    g.leads += r.leads;
+    g.impressions += r.impressions;
+    g.clicks += r.clicks;
+    g.estimated = g.estimated || Boolean(r.estimated);
+    if (!g.campaignName && r.campaignName) g.campaignName = r.campaignName;
+    g.countries.push(r);
+    out.set(id, g);
+  }
+
+  return [...out.values()]
+    .map((g) => ({
+      ...derive(g),
+      countries: [...g.countries].sort((a, b) => b.spend - a.spend || b.revenue - a.revenue),
+    }))
+    .sort((a, b) => b.spend - a.spend || b.revenue - a.revenue);
+}
+
 /** One row covering everything on screen, from the sums rather than the rows' own ratios. */
 export function totalsOf(rows) {
   const sum = (f) => rows.reduce((n, r) => n + (Number(r[f]) || 0), 0);
@@ -237,8 +280,11 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     .catch(() => ({ id: accountId, name: accountId, currency: 'USD' }));
 
   const tonic = sessionDays.countryRange(from, to, param);
-  const { rows, splits, unattributed } = foldCountries(insights.rows, tonic);
-  const totals = totalsOf(rows);
+  const { rows: byCountry, splits, unattributed } = foldCountries(insights.rows, tonic);
+  const rows = groupByCampaign(byCountry);
+  /* From the country rows, so the total cannot drift from what the campaign
+     rows add up to even if the grouping above changes. */
+  const totals = totalsOf(byCountry);
 
   if (fill.unreported.length) {
     notes.push(
@@ -267,7 +313,7 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
       + 'It is kept under a row with no campaign, so the total still matches Final Data.'
     );
   }
-  if (rows.some((r) => r.country === UNKNOWN)) {
+  if (byCountry.some((r) => r.country === UNKNOWN)) {
     notes.push('Sessions Tonic reported without a country are grouped under “??”.');
   }
 
@@ -285,6 +331,8 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
       lastFinalDate,
       daysFetched: fill.fetched,
       daysFromCache: fill.cached,
+      campaigns: rows.length,
+      countryRows: byCountry.length,
     },
   });
 }));
