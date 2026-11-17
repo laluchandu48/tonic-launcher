@@ -79,6 +79,35 @@ export function derive(row) {
  * Exported and free of network calls so it can be tested against fixtures:
  * this is the part with the arithmetic in it.
  */
+/**
+ * Keep only the Tonic rows belonging to adsets of the account on screen.
+ *
+ * The session cache is keyed by adset id alone — it knows nothing about ad
+ * accounts, because Tonic does not. Folding all of it against one account's
+ * spend put other accounts' campaigns on this screen, revenue and all. The
+ * adsets Facebook returned for this account are the only ones whose revenue
+ * belongs here.
+ *
+ * What this does cost: an adset of this account with revenue but no delivery
+ * in the range is not in Facebook's answer either, so its revenue drops out
+ * too. The amount is returned rather than swallowed, and the screen says so.
+ */
+export function scopeToAccount(tonicRows, fbRows) {
+  const mine = new Set(fbRows.map((r) => String(r.adsetId)));
+  const kept = [];
+  let droppedRevenue = 0;
+  const droppedKeys = new Set();
+
+  for (const t of tonicRows) {
+    if (mine.has(String(t.key))) kept.push(t);
+    else {
+      droppedRevenue += Number(t.revenue) || 0;
+      droppedKeys.add(String(t.key));
+    }
+  }
+  return { kept, droppedRevenue: round(droppedRevenue), droppedAdsets: droppedKeys.size };
+}
+
 export function foldCountries(fbRows, tonicRows) {
   /* Tonic first, because it is what names a campaign. Keyed by adset and
      country so Facebook's spend can find it. */
@@ -288,7 +317,9 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     .catch(() => ({ id: accountId, name: accountId, currency: 'USD' }));
 
   const tonic = sessionDays.countryRange(from, to, param);
-  const { rows: byCountry, splits, unattributed } = foldCountries(insights.rows, tonic);
+  /* Scoped first: the cache holds every ad account's adsets together. */
+  const { kept, droppedRevenue, droppedAdsets } = scopeToAccount(tonic, insights.rows);
+  const { rows: byCountry, splits, unattributed } = foldCountries(insights.rows, kept);
   const rows = groupByCampaign(byCountry);
   /* From the country rows, so the total cannot drift from what the campaign
      rows add up to even if the grouping above changes. */
@@ -313,6 +344,13 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
     notes.push(
       `${splits} adset${splits === 1 ? '' : 's'} sent traffic to more than one Tonic campaign in the same country. `
       + 'Their spend is divided between those campaigns in proportion to revenue — an estimate, not a measurement.'
+    );
+  }
+  if (droppedRevenue > 0) {
+    notes.push(
+      `${droppedRevenue.toFixed(2)} of Tonic revenue came from ${droppedAdsets} adset`
+      + `${droppedAdsets === 1 ? '' : 's'} this ad account did not run in this range — another `
+      + 'account\u2019s, or an adset with no delivery — and is not counted here.'
     );
   }
   if (unattributed > 0) {
@@ -341,6 +379,7 @@ router.get('/', requireCredentials, requireFbCredentials, asyncRoute(async (req,
       daysFromCache: fill.cached,
       campaigns: rows.length,
       countryRows: byCountry.length,
+      adsets: new Set(insights.rows.map((r) => r.adsetId)).size,
     },
   });
 }));

@@ -112,7 +112,9 @@ export default function Country() {
 
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState('');
+  const [accountFilter, setAccountFilter] = useState('');
   const [accountsLoading, setAccountsLoading] = useState(true);
+  const [restricted, setRestricted] = useState(false);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -132,9 +134,12 @@ export default function Country() {
 
   useEffect(() => {
     api.finalData.adAccounts()
-      .then(({ accounts: list, selected }) => {
+      .then(({ accounts: list, selected, restricted: only }) => {
         setAccounts(list);
-        setAccountId(selected || list[0]?.id || '');
+        setRestricted(Boolean(only));
+        /* "all" belongs to Final Data, which can combine accounts; here a
+           single account is the whole point, so fall back to the first. */
+        setAccountId(selected && selected !== 'all' ? selected : list[0]?.id || '');
       })
       .catch((err) => {
         if (err.code === 'NO_FB_CREDENTIALS') setBlocked('facebook');
@@ -180,6 +185,21 @@ export default function Country() {
   }, [range, accountId, accountsLoading]);
 
   useEffect(() => { load(); }, [load]);
+
+  /** Remembered server-side, like Final Data, so both screens open on the
+      same account and picking one here is not undone by the other. */
+  const chooseAccount = (id) => {
+    setAccountId(id);
+    if (!restricted) api.fbSettings.selectAccount(id).catch(() => {});
+  };
+
+  const visibleAccounts = useMemo(() => {
+    const q = accountFilter.trim().toLowerCase();
+    if (!q) return accounts;
+    return accounts.filter((a) => `${a.name} ${a.id}`.toLowerCase().includes(q));
+  }, [accounts, accountFilter]);
+
+  const currentAccount = accounts.find((a) => a.id === accountId) || null;
 
   const chooseRange = (key) => {
     setRangeKey(key);
@@ -348,13 +368,14 @@ export default function Country() {
         <select
           className="topbar-select"
           value={accountId}
-          onChange={(e) => setAccountId(e.target.value)}
+          onChange={(e) => chooseAccount(e.target.value)}
           disabled={accountsLoading || accounts.length === 0}
           aria-label="Ad account"
+          title={currentAccount ? `${currentAccount.name} · ${currentAccount.id}` : 'Ad account'}
         >
           {accountsLoading && <option value="">Loading…</option>}
           {!accountsLoading && accounts.length === 0 && <option value="">No ad accounts</option>}
-          {accounts.map((a) => (
+          {visibleAccounts.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}{a.currency ? ` (${a.currency})` : ''}{a.active ? '' : ' — inactive'}
             </option>
