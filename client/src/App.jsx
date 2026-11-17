@@ -10,6 +10,7 @@ import CampaignDetail from './pages/CampaignDetail.jsx';
 import Keywords from './pages/Keywords.jsx';
 import Compliance from './pages/Compliance.jsx';
 import FinalData from './pages/FinalData.jsx';
+import Country from './pages/Country.jsx';
 import AdsetHistory from './pages/AdsetHistory.jsx';
 import FbSettings from './pages/FbSettings.jsx';
 import Settings from './pages/Settings.jsx';
@@ -95,6 +96,7 @@ export default function App() {
         <Route path="/campaigns/keywords" element={<Keywords />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/compliance" element={<Compliance />} />
+        <Route path="/country" element={<Country />} />
         <Route path="/final-data" element={<FinalData />} />
         <Route path="/final-data/adsets/:id" element={<AdsetHistory />} />
         <Route path="/fb-settings" element={<FbSettings />} />

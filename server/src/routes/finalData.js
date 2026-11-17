@@ -117,10 +117,10 @@ const DATA_START_DATE = String(process.env.DATA_START_DATE || '2026-10-08').slic
 
 const maxDate = (a, b) => (a > b ? a : b);
 /** The earliest date either API can usefully be asked about. */
-const rangeFloor = (today) =>
+export const rangeFloor = (today) =>
   maxDate(DATA_START_DATE, iso(new Date(today.getTime() - (MAX_LOOKBACK_DAYS - 1) * DAY)));
 /** Say which of the two limits moved the start, because they move it for different reasons. */
-const floorNote = (floor) => (floor === DATA_START_DATE
+export const floorNote = (floor) => (floor === DATA_START_DATE
   ? `This dashboard started collecting on ${DATA_START_DATE}, so the range starts there.`
   : `Tonic's session report only goes back ${MAX_LOOKBACK_DAYS} days, so the range starts at ${floor}.`);
 
@@ -132,7 +132,7 @@ function eachDay(from, to) {
   return out;
 }
 
-const round = (n, places = 2) => {
+export const round = (n, places = 2) => {
   const f = 10 ** places;
   return Math.round((Number(n) || 0) * f) / f;
 };
@@ -144,9 +144,16 @@ const round = (n, places = 2) => {
  * and `estimation_5h` are earlier, less settled numbers, so this uses the one
  * the dashboard also reports as revenue.
  */
-async function fetchTonicDay(date, param) {
-  const columns = ['campaign_id', 'clicks', 'estimation', `querystring.${param}`].join(',');
+export async function fetchTonicDay(date, param) {
+  /* country and campaign_name cost nothing — the same rows, two more fields —
+     and they are what the Country screen is built from. Asking for them here
+     means both grains come out of one call per day rather than two. */
+  const columns = [
+    'campaign_id', 'campaign_name', 'country', 'clicks', 'estimation',
+    `querystring.${param}`,
+  ].join(',');
   const totals = new Map();
+  const byCountry = new Map();
   let sessions = 0;
   let offset = 0;
   let pages = 0;
@@ -166,6 +173,22 @@ async function fetchTonicDay(date, param) {
       acc.clicks += Number(r.clicks) || 0;
       acc.revenue += Number(r.estimation) || 0;
       totals.set(key, acc);
+
+      /* '??' rather than dropping the session: revenue with no country is
+         still revenue, and a total that quietly omits it is wrong. */
+      const country = String(r.country ?? '').trim().toUpperCase() || '??';
+      const campaignId = String(r.campaign_id ?? '').trim();
+      const ck = `${key}\u0000${country}\u0000${campaignId}`;
+      const cAcc = byCountry.get(ck) || {
+        key, country, campaignId,
+        campaignName: r.campaign_name || null,
+        sessions: 0, clicks: 0, revenue: 0,
+      };
+      cAcc.sessions += 1;
+      cAcc.clicks += Number(r.clicks) || 0;
+      cAcc.revenue += Number(r.estimation) || 0;
+      if (!cAcc.campaignName && r.campaign_name) cAcc.campaignName = r.campaign_name;
+      byCountry.set(ck, cAcc);
     }
 
     sessions += rows.length;
@@ -174,7 +197,12 @@ async function fetchTonicDay(date, param) {
     offset += PAGE_SIZE;
   }
 
-  return { rows: [...totals.values()], sessions, truncated: pages >= MAX_PAGES };
+  return {
+    rows: [...totals.values()],
+    countryRows: [...byCountry.values()],
+    sessions,
+    truncated: pages >= MAX_PAGES,
+  };
 }
 
 /**
@@ -189,7 +217,7 @@ async function fetchTonicDay(date, param) {
  */
 const BEYOND_TONIC_MAX = /later than the maximum date/i;
 
-async function ensureTonicRange(from, to, param, lastFinalDate) {
+export async function ensureTonicRange(from, to, param, lastFinalDate, { country = false } = {}) {
   let fetched = 0;
   let cached = 0;
   const truncatedDays = [];
@@ -199,7 +227,10 @@ async function ensureTonicRange(from, to, param, lastFinalDate) {
     const isFinal = Boolean(lastFinalDate) && date <= lastFinalDate;
     const known = sessionDays.status(date, param);
 
-    if (known && known.complete && isFinal) {
+    /* A day finalised and already stored is not refetched — unless the
+       caller needs the country grain and this day predates it. */
+    const enough = known && known.complete && isFinal && (!country || known.has_country);
+    if (enough) {
       cached += 1;
       if (known.truncated) truncatedDays.push(date);
       continue;
@@ -214,7 +245,7 @@ async function ensureTonicRange(from, to, param, lastFinalDate) {
          incomplete so it fills in for real once Tonic has it. Any other error
          is a genuine problem and still travels. */
       if (!BEYOND_TONIC_MAX.test(err?.message || '')) throw err;
-      day = { rows: [], sessions: 0, truncated: false };
+      day = { rows: [], countryRows: [], sessions: 0, truncated: false };
       unreported.push(date);
     }
 
@@ -222,6 +253,7 @@ async function ensureTonicRange(from, to, param, lastFinalDate) {
       complete: isFinal ? 1 : 0,
       truncated: day.truncated ? 1 : 0,
       sessions: day.sessions,
+      countryRows: day.countryRows || [],
     });
     fetched += 1;
     if (day.truncated) truncatedDays.push(date);

@@ -46,6 +46,18 @@ export const api = {
       request('/auth/password', { method: 'POST', body: { currentPassword, newPassword } }),
   },
 
+  /** Tonic revenue and Facebook spend, per Tonic campaign per country. */
+  country: {
+    get: ({ from, to, account, param } = {}) => {
+      const q = new URLSearchParams();
+      if (from) q.set('from', from);
+      if (to) q.set('to', to);
+      if (param) q.set('param', param);
+      if (account) q.set('account', account);
+      return request(`/country?${q}`);
+    },
+  },
+
   stats: {
     get: ({ from, to, group }) => {
       const q = new URLSearchParams();

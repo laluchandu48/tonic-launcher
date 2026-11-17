@@ -9,6 +9,7 @@ const NAV = [
   { to: '/campaigns', label: 'Campaigns', icon: '◪' },
   { to: '/final-data', label: 'Final Data', icon: '⇄' },
   { to: '/compliance', label: 'Compliance', icon: '⛨' },
+  { to: '/country', label: 'Country', icon: '◍' },
 ];
 
 /* Settings used to sit here beside Campaigns and Articles, which put "change

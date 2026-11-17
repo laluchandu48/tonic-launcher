@@ -553,6 +553,53 @@ export class FacebookClient {
    * what the Final Data table shows. Per-day rows would be 30x the volume for
    * a breakdown nothing currently displays.
    */
+  /**
+   * The same adset insights, split by the viewer's country.
+   *
+   * Meta returns one row per adset per country, so this is the only way to
+   * get spend against a country — the unsplit call above cannot be divided
+   * after the fact. Rows multiply by the number of countries an adset
+   * reaches, hence the same page cap.
+   */
+  async getAdsetCountryInsights({ since, until, accountId }) {
+    const account = normaliseAdAccountId(accountId) || this.adAccountId;
+    if (!account) throw new FacebookError('No ad account selected.', { status: 428 });
+
+    const rows = [];
+    let body = await this.request(`/${account}/insights`, {
+      level: 'adset',
+      fields: 'adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,actions',
+      breakdowns: 'country',
+      time_range: { since, until },
+      time_increment: 'all_days',
+      limit: 500,
+    });
+
+    let pages = 0;
+    while (body && pages < MAX_PAGES) {
+      for (const r of body.data || []) {
+        rows.push({
+          adsetId: String(r.adset_id),
+          adsetName: r.adset_name || null,
+          campaignId: r.campaign_id != null ? String(r.campaign_id) : null,
+          campaignName: r.campaign_name || null,
+          // Meta's two-letter code, which is what Tonic reports too.
+          country: String(r.country || '').toUpperCase() || null,
+          spend: Number(r.spend) || 0,
+          impressions: Number(r.impressions) || 0,
+          clicks: Number(r.clicks) || 0,
+          leads: leadsFrom(r.actions),
+        });
+      }
+      pages += 1;
+      const next = body.paging?.next;
+      if (!next) break;
+      body = await this.requestUrl(new URL(next), '/insights');
+    }
+
+    return { rows, truncated: pages >= MAX_PAGES };
+  }
+
   async getAdsetInsights({ since, until, accountId }) {
     const account = normaliseAdAccountId(accountId) || this.adAccountId;
     if (!account) throw new FacebookError('No ad account selected.', { status: 428 });

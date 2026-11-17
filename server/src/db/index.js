@@ -95,6 +95,27 @@ db.exec(`
     PRIMARY KEY (date, param, key)
   );
 
+  /*
+   * The same sessions, kept a second time at country grain.
+   *
+   * A separate table rather than a country column on the one above: that
+   * table's primary key is (date, param, key) and everything already reads
+   * it summed per key, so widening the key would change what Final Data
+   * means. This one is written in the same transaction, from the same API
+   * response, so the two cannot disagree.
+   */
+  CREATE TABLE IF NOT EXISTS tonic_country_days (
+    date          TEXT    NOT NULL,
+    param         TEXT    NOT NULL,
+    key           TEXT    NOT NULL,       -- the adset id the link carried
+    country       TEXT    NOT NULL,       -- two-letter code, '??' when absent
+    campaign_id   TEXT    NOT NULL DEFAULT '',
+    campaign_name TEXT,
+    sessions      INTEGER NOT NULL DEFAULT 0,
+    clicks        INTEGER NOT NULL DEFAULT 0,
+    revenue       REAL    NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, param, key, country, campaign_id)
+  );
   CREATE TABLE IF NOT EXISTS tonic_session_day_status (
     date       TEXT    NOT NULL,
     param      TEXT    NOT NULL,
@@ -310,18 +331,26 @@ export const sessionDays = {
    * Replace a day wholesale. A partial write would silently under-report, so
    * the delete and the inserts share one transaction.
    */
-  replaceDay(date, param, rows, { complete = 0, truncated = 0, sessions = 0 } = {}) {
+  replaceDay(date, param, rows, { complete = 0, truncated = 0, sessions = 0, countryRows = null } = {}) {
     const wipe = db.prepare('DELETE FROM tonic_session_days WHERE date = ? AND param = ?');
+    const wipeCountries = db.prepare('DELETE FROM tonic_country_days WHERE date = ? AND param = ?');
+    const insertCountry = db.prepare(`
+      INSERT INTO tonic_country_days
+        (date, param, key, country, campaign_id, campaign_name, sessions, clicks, revenue)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
     const insert = db.prepare(`
       INSERT INTO tonic_session_days (date, param, key, sessions, clicks, revenue)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     const mark = db.prepare(`
-      INSERT INTO tonic_session_day_status (date, param, complete, truncated, sessions, fetched_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      INSERT INTO tonic_session_day_status
+        (date, param, complete, truncated, sessions, has_country, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(date, param) DO UPDATE SET
         complete = excluded.complete, truncated = excluded.truncated,
-        sessions = excluded.sessions, fetched_at = datetime('now')
+        sessions = excluded.sessions, has_country = excluded.has_country,
+        fetched_at = datetime('now')
     `);
 
     db.transaction(() => {
@@ -329,7 +358,18 @@ export const sessionDays = {
       for (const r of rows) {
         insert.run(date, param, r.key, r.sessions || 0, r.clicks || 0, r.revenue || 0);
       }
-      mark.run(date, param, complete ? 1 : 0, truncated ? 1 : 0, sessions);
+      /* null means this caller did not ask for the country grain; an empty
+         array means it did and the day genuinely had no sessions. */
+      if (countryRows) {
+        wipeCountries.run(date, param);
+        for (const r of countryRows) {
+          insertCountry.run(
+            date, param, r.key, r.country || '??', r.campaignId || '',
+            r.campaignName || null, r.sessions || 0, r.clicks || 0, r.revenue || 0
+          );
+        }
+      }
+      mark.run(date, param, complete ? 1 : 0, truncated ? 1 : 0, sessions, countryRows ? 1 : 0);
     })();
   },
 
@@ -346,6 +386,20 @@ export const sessionDays = {
     `).all(param, from, to);
   },
 
+  /** A range at country grain: one row per adset, country and Tonic campaign. */
+  countryRange(from, to, param) {
+    return db.prepare(`
+      SELECT key, country, campaign_id AS campaignId,
+             MAX(campaign_name) AS campaignName,
+             SUM(sessions) AS sessions,
+             SUM(clicks)   AS clicks,
+             SUM(revenue)  AS revenue
+        FROM tonic_country_days
+       WHERE param = ? AND date BETWEEN ? AND ?
+       GROUP BY key, country, campaign_id
+    `).all(param, from, to);
+  },
+
   /** One key's day-by-day rows, for the per-adset history view. */
   byKey(from, to, param, key) {
     return db.prepare(`
@@ -359,6 +413,7 @@ export const sessionDays = {
   /** Dropped when the join parameter changes — the old grouping is meaningless. */
   clearParam(param) {
     db.prepare('DELETE FROM tonic_session_days WHERE param = ?').run(param);
+    db.prepare('DELETE FROM tonic_country_days WHERE param = ?').run(param);
     db.prepare('DELETE FROM tonic_session_day_status WHERE param = ?').run(param);
   },
 };
@@ -384,6 +439,13 @@ for (const [column, definition] of [
   if (!present) db.exec(`ALTER TABLE users ADD COLUMN ${column} ${definition}`);
 }
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL');
+
+/* Days cached before the country table existed hold no country rows. The flag
+   says which, so the Country screen can refetch those days instead of
+   reporting a day of real traffic as empty. */
+if (!db.prepare('PRAGMA table_info(tonic_session_day_status)').all().some((c) => c.name === 'has_country')) {
+  db.exec('ALTER TABLE tonic_session_day_status ADD COLUMN has_country INTEGER NOT NULL DEFAULT 0');
+}
 
 /** Roles: an admin runs the place; a viewer sees Final Data and nothing else. */
 /**
