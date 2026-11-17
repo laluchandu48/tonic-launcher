@@ -91,11 +91,15 @@ export function foldCountries(fbRows, tonicRows) {
   }
 
   const out = new Map();
-  const touch = (campaignId, campaignName, country) => {
+  const touch = (campaignId, campaignName, country, source = 'tonic') => {
     const k = `${campaignId}\u0000${country}`;
     const row = out.get(k) || {
       campaignId: campaignId || null,
       campaignName: campaignName || null,
+      /* 'tonic' when the name came from the session report, 'facebook' when
+         there was no Tonic session to name it and the ad account's own
+         campaign is standing in. The screen says which. */
+      source,
       country,
       spend: 0,
       revenue: 0,
@@ -128,11 +132,14 @@ export function foldCountries(fbRows, tonicRows) {
     const campaigns = tonicByAdset.get(`${f.adsetId}\u0000${country}`) || [];
 
     if (campaigns.length === 0) {
-      /* Spend in a country that returned no Tonic session. Kept, under a row
-         with no campaign name: dropping it would make the spend total on this
-         screen disagree with Final Data for the same range. */
+      /* Spend in a country that returned no Tonic session. Kept — dropping it
+         would make the spend total on this screen disagree with Final Data
+         for the same range — and labelled with the Facebook campaign that
+         spent it, since that is the only name this row has. Keyed by that
+         campaign so a dozen of them do not collapse into one anonymous row. */
       unattributed += Number(f.spend) || 0;
-      const row = touch('', null, country);
+      const fbId = f.campaignId ? `fb:${f.campaignId}` : 'fb:none';
+      const row = touch(fbId, f.campaignName || null, country, 'facebook');
       row.spend += Number(f.spend) || 0;
       row.leads += Number(f.leads) || 0;
       row.impressions += Number(f.impressions) || 0;
@@ -185,6 +192,7 @@ export function groupByCampaign(rows) {
     const g = out.get(id) || {
       campaignId: r.campaignId || null,
       campaignName: r.campaignName || null,
+      source: r.source || 'tonic',
       spend: 0, revenue: 0, conversions: 0, sessions: 0,
       leads: 0, impressions: 0, clicks: 0,
       estimated: false,

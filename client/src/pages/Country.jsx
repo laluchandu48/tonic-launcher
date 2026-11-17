@@ -271,13 +271,24 @@ export default function Country() {
 
   const cell = (col, r, child = false) => {
     switch (col.key) {
-      case 'campaignName':
+      case 'campaignName': {
         if (child) return null;
-        return r.campaignName || (
-          <span className="muted" title="Spend in a country with no Tonic session against it">
-            No Tonic campaign
-          </span>
-        );
+        /* No Tonic session carried this spend, so there is no Tonic campaign
+           to name it. The Facebook campaign that spent the money is the only
+           name the row has — shown, and marked, so it is not mistaken for a
+           campaign that earned nothing. */
+        if (r.source === 'facebook') {
+          return (
+            <>
+              {r.campaignName || <span className="muted">Unnamed campaign</span>}
+              <div className="muted" style={{ fontSize: 11 }} title="No Tonic session matched this spend, so this is the Facebook campaign name">
+                Facebook · no Tonic sessions
+              </div>
+            </>
+          );
+        }
+        return r.campaignName || <span className="muted">Unnamed campaign</span>;
+      }
       case 'country': {
         if (child) return countryCell(r.country);
         const list = r.countries || [];
